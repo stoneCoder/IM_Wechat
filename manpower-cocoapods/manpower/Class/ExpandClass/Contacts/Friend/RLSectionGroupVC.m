@@ -1,0 +1,192 @@
+//
+//  RLSectionGroupVC.m
+//  manpower
+//
+//  Created by Brian on 14-6-19.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import "RLSectionGroupVC.h"
+#import "IMAlert.h"
+@interface RLSectionGroupVC ()
+
+@end
+
+@implementation RLSectionGroupVC
+
+- (id)initWithNibName:(NSString *)nibNameOrNil bundle:(NSBundle *)nibBundleOrNil
+{
+    self = [super initWithNibName:nibNameOrNil bundle:nibBundleOrNil];
+    if (self) {
+        self.sectionArray = [[NSMutableArray alloc] init];
+        NSMutableArray *friendGroupList = [[FriendDataHelp sharedFriendDataHelp] friendGroupList];
+        
+        if (friendGroupList.count == 0) {
+            SectionInfoModel * model=[[SectionInfoModel alloc]init];
+            model.name=kDefaultGroupName;
+            [self.sectionArray addObject:model];
+        }
+        [self.sectionArray  addObjectsFromArray:friendGroupList];
+        self.currentIndex = -1;
+    }
+    return self;
+}
+
+- (void)viewDidLoad
+{
+    [super viewDidLoad];
+    // Do any additional setup after loading the view.
+    [self makeNaviLeftButtonVisible:YES];
+
+    [self setTitleText:@"选择分组"];
+    
+//    UIButton * rightBtn=[UIButton buttonWithType:UIButtonTypeCustom];
+//    [rightBtn setFrame:CGRectMake(0, 0, 54, 28)];
+//    [rightBtn setImage:[UIImage imageNamed:@"btn_done"] forState:UIControlStateNormal];
+//    [rightBtn addTarget:self action:@selector(changeSectionclick:) forControlEvents:UIControlEventTouchUpInside];
+//    UIBarButtonItem * buttonItem=[[UIBarButtonItem alloc]initWithCustomView:rightBtn];
+//    self.navigationItem.rightBarButtonItem=buttonItem;
+    
+    [self setRightBarButtonWithTitle:@"完成" withTarget:self withSelector:@selector(changeSectionclick:)];
+
+}
+
+- (void)didReceiveMemoryWarning
+{
+    [super didReceiveMemoryWarning];
+    // Dispose of any resources that can be recreated.
+}
+
+/*
+#pragma mark - Navigation
+
+// In a storyboard-based application, you will often want to do a little preparation before navigation
+- (void)prepareForSegue:(UIStoryboardSegue *)segue sender:(id)sender
+{
+    // Get the new view controller using [segue destinationViewController].
+    // Pass the selected object to the new view controller.
+}
+*/
+
+-(void)changeSectionclick:(UIButton *)sender
+{
+    if (self.currentIndex==-1) {
+        if (self.fromType==1) {//加好友
+            [[XMPPManager sharedInstance] AddFriendWith:self.friendJID.user andGroup:kDefaultGroupName];
+//            [[XMPPManager sharedInstance] AddFriend:self.friendJID.user];
+            [self showStringHUD:@"请求已经发出" second:1.0];
+            
+        } else {//移动分组
+            [[IMAlert alloc] alert:@"请选择分组" delegate:self];
+        }
+    } else {
+        NSIndexPath *clickIndexPath = [NSIndexPath indexPathForRow:self.currentIndex inSection:0];
+        UITableViewCell *clickCell =  [self.tableView cellForRowAtIndexPath:clickIndexPath];
+        NSString *sectionName = clickCell.textLabel.text;
+//        if ([sectionName isEqualToString:kDefaultGroupName]) {
+//             [[XMPPManager sharedInstance] AddFriendWith:self.friendJID.user andGroup:kDefaultGroupName];
+//        }else
+//        {
+             [[XMPPManager sharedInstance] AddFriendWith:self.friendJID.user andGroup:sectionName];
+//        }
+       
+        if (self.fromType==1) {
+            [self showStringHUD:@"请求已经发出" second:1.0];
+        } else {
+            [self.navigationController popToRootViewControllerAnimated:YES];
+        }
+        
+    }
+   
+}
+-(void)hideHUD{
+    [self.navigationController popToRootViewControllerAnimated:YES];
+}
+#pragma mark UITableView
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
+{
+    return 1;
+}
+
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)sectionIndex
+{
+    return [self.sectionArray count];
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
+{
+	static NSString *CellIdentifier = @"Cell";
+	UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:CellIdentifier];
+	if (cell == nil)
+	{
+		cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault
+                                      reuseIdentifier:CellIdentifier];
+	}
+    SectionInfoModel * model= [self.sectionArray objectAtIndex:indexPath.row];
+    cell.textLabel.text = model.name;
+ 
+    if ([cell.textLabel.text isEqualToString:self.sectionName]) {
+          cell.accessoryType = UITableViewCellAccessoryCheckmark;
+          cell.accessoryView = [self changeAccessoryViewWithCheck:YES];
+          self.currentIndex = indexPath.row;
+    }else
+    {
+        cell.accessoryType = UITableViewCellAccessoryNone;
+        cell.accessoryView = [self changeAccessoryViewWithCheck:NO];
+    }
+    cell.selectionStyle = UITableViewCellSelectionStyleNone;
+	return cell;
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    [tableView deselectRowAtIndexPath:indexPath animated:NO];
+    if (self.sectionName) {
+        if(indexPath.row== self.currentIndex){
+            return;
+        }
+        NSIndexPath *oldIndexPath = [NSIndexPath indexPathForRow:self.currentIndex
+                                                       inSection:0];
+        UITableViewCell *newCell = [tableView cellForRowAtIndexPath:indexPath];
+        if (newCell.accessoryType == UITableViewCellAccessoryNone) {
+            newCell.accessoryType = UITableViewCellAccessoryCheckmark;
+            newCell.accessoryView = [self changeAccessoryViewWithCheck:YES];
+            newCell.textLabel.textColor=[UIColor blueColor];
+        }
+        UITableViewCell *oldCell = [tableView cellForRowAtIndexPath:oldIndexPath];
+        if (oldCell.accessoryType == UITableViewCellAccessoryCheckmark) {
+            oldCell.accessoryType = UITableViewCellAccessoryNone;
+            oldCell.accessoryView = [self changeAccessoryViewWithCheck:NO];
+            newCell.textLabel.textColor =[UIColor blackColor];
+        }
+    }else
+    {
+        UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
+        cell.accessoryType = UITableViewCellAccessoryCheckmark;
+        cell.accessoryView = [self changeAccessoryViewWithCheck:YES];
+        self.sectionName = cell.textLabel.text;
+    }
+    self.currentIndex=indexPath.row;
+}
+
+- (UITableViewCellAccessoryType)tableView:(UITableView *)tableView accessoryTypeForRowWithIndexPath:(NSIndexPath *)indexPath
+{
+    if(indexPath.row== self.currentIndex){
+        return UITableViewCellAccessoryCheckmark;
+    }
+    else{
+        return UITableViewCellAccessoryNone;
+    }
+}
+
+-(UIView *)changeAccessoryViewWithCheck:(BOOL)checkType
+{
+    UIButton *checkButton = [[UIButton alloc] initWithFrame:CGRectMake(0.0,0.0,18,18)];
+    checkButton.backgroundColor = [UIColor clearColor];
+    if (checkType) {
+        UIImage *image = [UIImage imageNamed:@"single_check"];
+        [checkButton setBackgroundImage:image forState:UIControlStateNormal];
+    }
+    return checkButton;
+}
+@end

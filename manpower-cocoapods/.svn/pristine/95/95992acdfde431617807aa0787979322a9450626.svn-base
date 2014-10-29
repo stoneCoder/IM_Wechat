@@ -1,0 +1,38 @@
+//
+//  RLGroupSetInfoVC.h
+//  manpower
+//
+//  Created by hanjin on 14-6-11.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import "RLBaseTableVC.h"
+#import "XMPPManager.h"
+#import "IMAlert.h"
+#import "RLInviteIntoRoomVC.h"
+#import "RLInfoCell.h"
+#import "RLGroupVO.h"
+@class RLRoom;
+
+@interface RLGroupSetInfoVC : RLBaseTableVC
+@property (strong,nonatomic) XMPPRoom *xmppRoom;
+@property (strong,nonatomic) XMPPJID * roomJID;
+@property (strong,nonatomic) NSString * roomSubject;
+@property (assign,nonatomic) int isOwner;
+@property (strong,nonatomic) UIButton *inviteButton;
+@property (strong,nonatomic) UIButton *sendButton;
+@property (strong,nonatomic) UIButton *quitButton;
+@property (strong,nonatomic) UIButton *finishButton;
+@property (strong,nonatomic) UIButton *registeButton;
+@property (strong,nonatomic) UIButton *dismissButton;
+@property (assign,nonatomic) int createFlag; //0 创建群 1 搜索群 2 查看
+
+@property (strong,nonatomic) RLInfoCell *rlIDInfoCell;
+@property (strong,nonatomic) RLInfoCell *rlmemberInfoCell;
+@property (strong,nonatomic) RLInfoCell *rltermInfoCell;
+@property (strong,nonatomic) RLGroupVO *group;
+@property (strong,nonatomic) RLRoom *room;
+
+@property (strong,nonatomic) XMPPStream *xmppStream;
+
+@end

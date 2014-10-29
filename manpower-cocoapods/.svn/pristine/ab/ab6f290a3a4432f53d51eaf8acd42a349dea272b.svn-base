@@ -1,0 +1,871 @@
+//
+//  XMPPManager.m
+//  manpower
+//
+//  Created by hanjin on 14-6-3.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import "XMPPManager.h"
+#import "GCDAsyncSocket.h"
+#import "XMPP.h"
+#import "XMPPReconnect.h"
+#import "XMPPCapabilitiesCoreDataStorage.h"
+#import "XMPPRosterCoreDataStorage.h"
+#import "XMPPvCardAvatarModule.h"
+#import "XMPPvCardCoreDataStorage.h"
+#import "DDLog.h"
+#import "DDTTYLogger.h"
+#import <CFNetwork/CFNetwork.h>
+#import "NSData+XMPP.h"
+#import "IMAlert.h"
+#import "IMMessageStorage.h"
+#import "AppDelegate.h"
+#import "NotificationDataHelp.h"
+#import "RLFriendLogic.h"
+#import "RLPersonLogic.h"
+#import "RLFriend.h"
+#import "AppDelegate.h"
+#import "XMPPRoomManager.h"
+#import "IMMessageHelper.h"
+#import "RLFriend.h"
+#import "XMPPGroupCoreDataStorageObject.h"
+#import "RLRoom.h"
+
+@implementation XMPPManager
+@synthesize xmppStream;
+@synthesize xmppReconnect;
+@synthesize xmppRoster;
+@synthesize xmppRoom;
+@synthesize xmppRosterStorage;
+@synthesize xmppvCardTempModule;
+@synthesize xmppvCardAvatarModule;
+@synthesize xmppCapabilities;
+@synthesize xmppCapabilitiesStorage;
+@synthesize xmppMessageArchivingCoreDataStorage;
+@synthesize xmppMessageArchivingModule;
+@synthesize imMessageStorage;
+NSString *const kXMPPmyJID = @"kXMPPmyJID";
+NSString *const kXMPPmyPassword = @"kXMPPmyPassword";
+
+
+static XMPPManager * sharedManager;
++(XMPPManager *)sharedInstance{
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        sharedManager=[[XMPPManager alloc]init];
+        // Configure logging framework
+        [DDLog addLogger:[DDTTYLogger sharedInstance]];
+        // Setup the XMPP stream
+        [sharedManager setupStream];
+        
+    });
+    // Setup the XMPP stream
+    return sharedManager;
+}
+- (void)dealloc
+{
+	[self teardownStream];
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#pragma mark Core Data
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+- (NSManagedObjectContext *)managedObjectContext_roster
+{
+	return [xmppRosterStorage mainThreadManagedObjectContext];
+}
+
+- (NSManagedObjectContext *)managedObjectContext_capabilities
+{
+	return [xmppCapabilitiesStorage mainThreadManagedObjectContext];
+}
+
+- (NSManagedObjectContext *)managedObjectContext_imMessage
+{
+	return [imMessageStorage mainThreadManagedObjectContext];
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#pragma mark Private
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//初始化XMPPStream
+- (void)setupStream
+{
+	NSAssert(xmppStream == nil, @"Method setupStream invoked multiple times");
+	
+	// Setup xmpp stream
+	//
+	// The XMPPStream is the base class for all activity.
+	// Everything else plugs into the xmppStream, such as modules/extensions and delegates.
+    
+	xmppStream = [[XMPPStream alloc] init];
+	
+#if !TARGET_IPHONE_SIMULATOR
+	{
+		// Want xmpp to run in the background?
+		//
+		// P.S. - The simulator doesn't support backgrounding yet.
+		//        When you try to set the associated property on the simulator, it simply fails.
+		//        And when you background an app on the simulator,
+		//        it just queues network traffic til the app is foregrounded again.
+		//        We are patiently waiting for a fix from Apple.
+		//        If you do enableBackgroundingOnSocket on the simulator,
+		//        you will simply see an error message from the xmpp stack when it fails to set the property.
+		
+		xmppStream.enableBackgroundingOnSocket = YES;
+	}
+#endif
+	
+	// Setup reconnect
+	//
+	// The XMPPReconnect module monitors for "accidental disconnections" and
+	// automatically reconnects the stream for you.
+	// There's a bunch more information in the XMPPReconnect header file.
+	
+	xmppReconnect = [[XMPPReconnect alloc] init];
+	
+	// Setup roster
+	//
+	// The XMPPRoster handles the xmpp protocol stuff related to the roster.
+	// The storage for the roster is abstracted.
+	// So you can use any storage mechanism you want.
+	// You can store it all in memory, or use core data and store it on disk, or use core data with an in-memory store,
+	// or setup your own using raw SQLite, or create your own storage mechanism.
+	// You can do it however you like! It's your application.
+	// But you do need to provide the roster with some storage facility.
+	
+	xmppRosterStorage = [[XMPPRosterCoreDataStorage alloc] init];
+    //	xmppRosterStorage = [[XMPPRosterCoreDataStorage alloc] initWithInMemoryStore];
+	
+	xmppRoster = [[XMPPRoster alloc] initWithRosterStorage:xmppRosterStorage];
+	
+    xmppRoster.autoClearAllUsersAndResources = NO;
+    
+	xmppRoster.autoFetchRoster = YES;
+	xmppRoster.autoAcceptKnownPresenceSubscriptionRequests = YES;
+	// Setup vCard support
+	//
+	// The vCard Avatar module works in conjuction with the standard vCard Temp module to download user avatars.
+	// The XMPPRoster will automatically integrate with XMPPvCardAvatarModule to cache roster photos in the roster.
+	
+	xmppvCardStorage = [XMPPvCardCoreDataStorage sharedInstance];
+	xmppvCardTempModule = [[XMPPvCardTempModule alloc] initWithvCardStorage:xmppvCardStorage];
+	
+	xmppvCardAvatarModule = [[XMPPvCardAvatarModule alloc] initWithvCardTempModule:xmppvCardTempModule];
+	
+	// Setup capabilities
+	//
+	// The XMPPCapabilities module handles all the complex hashing of the caps protocol (XEP-0115).
+	// Basically, when other clients broadcast their presence on the network
+	// they include information about what capabilities their client supports (audio, video, file transfer, etc).
+	// But as you can imagine, this list starts to get pretty big.
+	// This is where the hashing stuff comes into play.
+	// Most people running the same version of the same client are going to have the same list of capabilities.
+	// So the protocol defines a standardized way to hash the list of capabilities.
+	// Clients then broadcast the tiny hash instead of the big list.
+	// The XMPPCapabilities protocol automatically handles figuring out what these hashes mean,
+	// and also persistently storing the hashes so lookups aren't needed in the future.
+	//
+	// Similarly to the roster, the storage of the module is abstracted.
+	// You are strongly encouraged to persist caps information across sessions.
+	//
+	// The XMPPCapabilitiesCoreDataStorage is an ideal solution.
+	// It can also be shared amongst multiple streams to further reduce hash lookups.
+	
+	xmppCapabilitiesStorage = [XMPPCapabilitiesCoreDataStorage sharedInstance];
+    xmppCapabilities = [[XMPPCapabilities alloc] initWithCapabilitiesStorage:xmppCapabilitiesStorage];
+    
+    xmppCapabilities.autoFetchHashedCapabilities = YES;
+    xmppCapabilities.autoFetchNonHashedCapabilities = NO;
+    
+    // Setup XMPPMessageArchiving
+    // XMPPMessageArchivingModule is for local storage. We use store only on client mode in this app.
+    //======================================================================================================
+//    xmppMessageArchivingCoreDataStorage = [XMPPMessageArchivingCoreDataStorage sharedInstance];
+//    xmppMessageArchivingModule = [[XMPPMessageArchiving alloc] initWithMessageArchivingStorage:xmppMessageArchivingCoreDataStorage];
+//    [xmppMessageArchivingModule setClientSideMessageArchivingOnly:YES];
+    //======================================================================================================
+    
+    // Setup IMMessageStorage
+    imMessageStorage = [IMMessageStorage sharedInstance];
+    
+	// Activate xmpp modules
+    
+	[xmppReconnect         activate:xmppStream];
+	[xmppRoster            activate:xmppStream];
+	[xmppvCardTempModule   activate:xmppStream];
+	[xmppvCardAvatarModule activate:xmppStream];
+	[xmppCapabilities      activate:xmppStream];
+    [xmppMessageArchivingModule activate:xmppStream];
+
+	// Add ourself as a delegate to anything we may be interested in
+    
+	[xmppStream addDelegate:self delegateQueue:dispatch_get_main_queue()];
+	[xmppRoster addDelegate:self delegateQueue:dispatch_get_main_queue()];
+    
+    [xmppStream addDelegate:imMessageStorage delegateQueue:dispatch_get_main_queue()];
+
+	// Optional:
+	//
+	// Replace me with the proper domain and port.
+	// The example below is setup for a typical google talk account.
+	//
+	// If you don't supply a hostName, then it will be automatically resolved using the JID (below).
+	// For example, if you supply a JID like 'user@quack.com/rsrc'
+	// then the xmpp framework will follow the xmpp specification, and do a SRV lookup for quack.com.
+	//
+	// If you don't specify a hostPort, then the default (5222) will be used.
+	
+	[xmppStream setHostName:XMPP_HOST_NAME];
+	[xmppStream setHostPort:XMPP_HOST_PORT];
+	
+    
+	// You may need to alter these settings depending on the server you're connecting to
+	customCertEvaluation = YES;
+    
+}
+- (void)teardownStream
+{
+	[xmppStream removeDelegate:self];
+	[xmppRoster removeDelegate:self];
+	
+	[xmppReconnect         deactivate];
+	[xmppRoster            deactivate];
+	[xmppvCardTempModule   deactivate];
+	[xmppvCardAvatarModule deactivate];
+	[xmppCapabilities      deactivate];
+    [xmppMessageArchivingModule deactivate];
+
+	
+	[xmppStream disconnect];
+	
+	xmppStream = nil;
+	xmppReconnect = nil;
+    xmppRoster = nil;
+	xmppRosterStorage = nil;
+	xmppvCardStorage = nil;
+    xmppvCardTempModule = nil;
+	xmppvCardAvatarModule = nil;
+	xmppCapabilities = nil;
+	xmppCapabilitiesStorage = nil;
+    xmppMessageArchivingModule = nil;
+}
+// It's easy to create XML elments to send and to read received XML elements.
+// You have the entire NSXMLElement and NSXMLNode API's.
+//
+// In addition to this, the NSXMLElement+XMPP category provides some very handy methods for working with XMPP.
+//
+// On the iPhone, Apple chose not to include the full NSXML suite.
+// No problem - we use the KissXML library as a drop in replacement.
+//
+// For more information on working with XML elements, see the Wiki article:
+// https://github.com/robbiehanson/XMPPFramework/wiki/WorkingWithElements
+
+
+//发送在线状态
+- (void)goOnline
+{
+	XMPPPresence *presence = [XMPPPresence presence]; // type="available" is implicit
+    
+    NSString *domain = [xmppStream.myJID domain];
+    
+    //Google set their presence priority to 24, so we do the same to be compatible.
+    
+    if([domain isEqualToString:@"gmail.com"]
+       || [domain isEqualToString:@"gtalk.com"]
+       || [domain isEqualToString:@"talk.google.com"])
+    {
+        NSXMLElement *priority = [NSXMLElement elementWithName:@"priority" stringValue:@"24"];
+        [presence addChild:priority];
+    }
+	
+	[[self xmppStream] sendElement:presence];
+}
+
+//发送下线状态
+- (void)goOffline
+{
+	XMPPPresence *presence = [XMPPPresence presenceWithType:@"unavailable"];
+	
+	[[self xmppStream] sendElement:presence];
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#pragma mark Connect/disconnect
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+- (BOOL)connect
+{
+	if (![xmppStream isDisconnected]) {
+		return YES;
+	}
+    if (![xmppStream myJID]) {
+        //从本地取得用户名，密码和服务器地址
+        NSString *myJID = [self getFullJID:[[NSUserDefaults standardUserDefaults] stringForKey:kXMPPmyJID]];
+        NSString *myPassword = [[NSUserDefaults standardUserDefaults] stringForKey:kXMPPmyPassword];
+        if (myJID == nil || myPassword == nil) {
+            return NO;
+        }
+        //设置用户密码
+        [xmppStream setMyJID:[XMPPJID jidWithString:myJID]];
+        password = myPassword;
+    }
+    
+    //连接服务器
+	NSError *error = nil;
+	if (![xmppStream connectWithTimeout:XMPPStreamTimeoutNone error:&error])
+	{
+		UIAlertView *alertView = [[UIAlertView alloc] initWithTitle:@"Error connecting"
+		                                                    message:@"See console for error details."
+		                                                   delegate:nil
+		                                          cancelButtonTitle:@"Ok"
+		                                          otherButtonTitles:nil];
+		[alertView show];
+        
+		DDLogError(@"Error connecting: %@", error);
+        
+		return NO;
+	}
+    
+	return YES;
+}
+
+- (void)disconnect
+{
+	[self goOffline];
+	[xmppStream disconnect];
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#pragma mark XMPPStream Delegate
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+- (void)xmppStream:(XMPPStream *)sender socketDidConnect:(GCDAsyncSocket *)socket
+{
+	DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+}
+
+- (void)xmppStream:(XMPPStream *)sender willSecureWithSettings:(NSMutableDictionary *)settings
+{
+	DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+	
+	NSString *expectedCertName = [xmppStream.myJID domain];
+	if (expectedCertName)
+	{
+		[settings setObject:expectedCertName forKey:(NSString *)kCFStreamSSLPeerName];
+	}
+	
+	if (customCertEvaluation)
+	{
+//		[settings setObject:@(YES) forKey:GCDAsyncSocketManuallyEvaluateTrust];
+	}
+}
+
+/**
+ * Allows a delegate to hook into the TLS handshake and manually validate the peer it's connecting to.
+ *
+ * This is only called if the stream is secured with settings that include:
+ * - GCDAsyncSocketManuallyEvaluateTrust == YES
+ * That is, if a delegate implements xmppStream:willSecureWithSettings:, and plugs in that key/value pair.
+ *
+ * Thus this delegate method is forwarding the TLS evaluation callback from the underlying GCDAsyncSocket.
+ *
+ * Typically the delegate will use SecTrustEvaluate (and related functions) to properly validate the peer.
+ *
+ * Note from Apple's documentation:
+ *   Because [SecTrustEvaluate] might look on the network for certificates in the certificate chain,
+ *   [it] might block while attempting network access. You should never call it from your main thread;
+ *   call it only from within a function running on a dispatch queue or on a separate thread.
+ *
+ * This is why this method uses a completionHandler block rather than a normal return value.
+ * The idea is that you should be performing SecTrustEvaluate on a background thread.
+ * The completionHandler block is thread-safe, and may be invoked from a background queue/thread.
+ * It is safe to invoke the completionHandler block even if the socket has been closed.
+ *
+ * Keep in mind that you can do all kinds of cool stuff here.
+ * For example:
+ *
+ * If your development server is using a self-signed certificate,
+ * then you could embed info about the self-signed cert within your app, and use this callback to ensure that
+ * you're actually connecting to the expected dev server.
+ *
+ * Also, you could present certificates that don't pass SecTrustEvaluate to the client.
+ * That is, if SecTrustEvaluate comes back with problems, you could invoke the completionHandler with NO,
+ * and then ask the client if the cert can be trusted. This is similar to how most browsers act.
+ *
+ * Generally, only one delegate should implement this method.
+ * However, if multiple delegates implement this method, then the first to invoke the completionHandler "wins".
+ * And subsequent invocations of the completionHandler are ignored.
+ **/
+- (void)xmppStream:(XMPPStream *)sender didReceiveTrust:(SecTrustRef)trust
+ completionHandler:(void (^)(BOOL shouldTrustPeer))completionHandler
+{
+	DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+	
+	// The delegate method should likely have code similar to this,
+	// but will presumably perform some extra security code stuff.
+	// For example, allowing a specific self-signed certificate that is known to the app.
+	
+	dispatch_queue_t bgQueue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
+	dispatch_async(bgQueue, ^{
+		
+		SecTrustResultType result = kSecTrustResultDeny;
+		OSStatus status = SecTrustEvaluate(trust, &result);
+		
+		if (status == noErr && (result == kSecTrustResultProceed || result == kSecTrustResultUnspecified)) {
+			completionHandler(YES);
+		}
+		else {
+			completionHandler(NO);
+		}
+	});
+}
+
+- (void)xmppStreamDidSecure:(XMPPStream *)sender
+{
+	DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+}
+
+
+////连接服务器
+- (void)xmppStreamDidConnect:(XMPPStream *)sender
+{
+	DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+	
+    isXmppConnected = YES;
+    xmppStream.keepAliveInterval = 1;
+//    NSLog(@"isSecure = %d",[xmppStream isSecure]);
+//    
+//    NSError *err;
+//    [xmppStream secureConnection:&err];
+//    if (err) {
+//        NSLog(@"Secure Error: %@",err);
+//    }
+
+}
+
+//验证通过
+- (void)xmppStreamDidAuthenticate:(XMPPStream *)sender
+{
+    DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+
+}
+
+- (void)xmppStream:(XMPPStream *)sender didNotAuthenticate:(NSXMLElement *)error
+{
+    DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+
+}
+
+- (BOOL)xmppStream:(XMPPStream *)sender didReceiveIQ:(XMPPIQ *)iq
+{
+	DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+
+    return NO;
+}
+
+//收到消息
+- (void)xmppStream:(XMPPStream *)sender didReceiveMessage:(XMPPMessage *)message
+{
+	DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+    
+    NSXMLElement *groupXML = [message elementForName:@"x" xmlns:@"jabber:x:conference"];
+    if (groupXML) {
+        //群名称
+        NSString *groupName = [[groupXML attributeForName:@"jid"] stringValue];
+        NSXMLElement *inviteItem = [message elementForName:@"x" xmlns:@"http://jabber.org/protocol/muc#user"];
+        //发出邀请
+        NSString *inviteName = [[[inviteItem elementForName:@"invite"] attributeForName:@"from"] stringValue];
+        //原因
+        NSString *inviteReson = [[[inviteItem elementForName:@"invite"] elementForName:@"reason"] stringValue];
+        //发送通知
+        XMPPJID *groupJID = [XMPPJID jidWithString:groupName];
+        NotificationRequest * request=[[NotificationRequest alloc]initWithJid:groupJID name:inviteName requestType:2 acceptedState:0];
+        request.reasonStr = inviteReson;
+        [[NotificationDataHelp sharedNotificationDataHelp] saveNotificationRequest:request];
+        [self addTbcBadgeNum];
+        [self addLocalNotificationWith:request];
+        [[NSNotificationCenter  defaultCenter] postNotificationName:@"NotificationRequest" object:nil];
+    }
+}
+
+- (void)xmppStream:(XMPPStream *)sender didSendMessage:(XMPPMessage *)message{
+    DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+
+}
+
+- (void)xmppStream:(XMPPStream *)sender didSendPresence:(XMPPPresence *)presence{
+  
+}
+
+//收到好友上下线状态
+- (void)xmppStream:(XMPPStream *)sender didReceivePresence:(XMPPPresence *)presence
+{
+    DDLogVerbose(@"%@: %@ - %@", THIS_FILE, THIS_METHOD, [presence fromStr]);
+
+    //取得好友状态
+    NSString *presenceType = [NSString stringWithFormat:@"%@", [presence type]]; //online/offline
+    NSString *presenceFromUser =[NSString stringWithFormat:@"%@", [[presence from] user]];
+    DDLogInfo(@"presenceType:%@",presenceType);
+    DDLogInfo(@"用户:%@",presenceFromUser);
+    XMPPJID *jid = [XMPPJID jidWithString:[NSString stringWithFormat:@"%@@%@",presenceFromUser,XMPP_HOST_DOMAIN]];
+    
+    //1.邀请好友：好友同意－> subscribed-> subscribe
+    if ([presenceType isEqualToString:@"subscribe"]) {//收到加好友通知
+        if ([xmppRosterStorage userExistsWithJID:jid xmppStream:xmppStream]) {
+            [self acceptPresenceSubscriptionRequestFrom:jid andAddToRoster:YES];//这个时候双方加为好友
+//            NSString * groupName=[self.currentAddedGroup objectAtIndex:0];
+//            if ([groupName isEqualToString:kDefaultGroupName]) {
+//                self.currentAddedGroup = nil;
+//            }
+//            [xmppRoster addUser:jid withNickname:kDefaultGroupName groups:self.currentAddedGroup subscribeToPresence:YES];
+            [RLFriend asyncFriendWidthJIDStr:[jid user]];
+        }else{
+            //获取通知
+            NotificationRequest * request=[[NotificationRequest alloc]initWithJid:jid name:presenceFromUser requestType:1 acceptedState:0];
+            //取图片
+            /*
+            [[RLFriendLogic sharedRLFriendLogic] searchFriendInfoByAccount:presenceFromUser success:^(id json) {
+                NSDictionary * dic=(NSDictionary *)json;
+                NSString * imgStr=[dic objectForKey:@"photo"];
+                if (imgStr.length>0) {
+                    NSData *base64Data = [imgStr dataUsingEncoding:NSASCIIStringEncoding];
+                    NSData *decodedData = [base64Data xmpp_base64Decoded];
+                    UIImage *img = [UIImage imageWithData:decodedData];
+                    request.picImage=img;
+                }
+                request.imageURLString = imgStr;
+                [[NotificationDataHelp sharedNotificationDataHelp] saveNotificationRequest:request];
+                [self addTbcBadgeNum];
+                [self addLocalNotificationWith:request];
+                [[NSNotificationCenter  defaultCenter] postNotificationName:@"NotificationRequest" object:nil];
+                
+            } failure:^(NSError *err) {
+                
+            }];
+            */
+            [RLPersonLogic getPersonInfoWithUsername:presenceFromUser withView:nil success:^(id json){
+                NSString * imgStr=[[json objectForKey:@"returnObj"] objectForKey:@"photo"];
+                request.imageURLString = imgStr;
+                [[NotificationDataHelp sharedNotificationDataHelp] saveNotificationRequest:request];
+                [self addTbcBadgeNum];
+                [self addLocalNotificationWith:request];
+                [[NSNotificationCenter  defaultCenter] postNotificationName:@"NotificationRequest" object:nil];
+            } failure:^(id json){
+                
+            }];
+            
+        }
+    }
+    if ([presenceType isEqualToString:@"unsubscribed"]) {
+        [xmppRoster removeUser:jid];
+    }
+    
+    // 好友删除我，我应该从最近联系人中把好友删除掉。
+    // 要不要从数据库中清空好友消息呢？清了吧，你都删除我了，我也不跟你玩了。
+    if ([presenceType isEqualToString:@"unsubscribed"]) {
+        NSString *friend = [[presence from] bare];
+        [imMessageStorage removeRecentMessageWithBareJID: friend];
+        [imMessageStorage removeMessageWithBareJID: friend];
+    }
+}
+
+- (void)xmppStream:(XMPPStream *)sender didReceiveError:(id)error
+{
+	DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+}
+
+- (void)xmppStreamDidDisconnect:(XMPPStream *)sender withError:(NSError *)error
+{
+	DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+    if (error) {
+        DDLogError(@"%@",error);
+    }
+    
+	
+	if (!isXmppConnected && kReachability)
+	{
+        [self connect];
+	}
+}
+
+- (void)xmppStreamDidRegister:(XMPPStream *)sender{
+    DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+
+}
+
+
+- (void)xmppStream:(XMPPStream *)sender didNotRegister:(NSXMLElement *)error{
+    DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#pragma mark XMPPRosterDelegate
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+- (void)xmppRoster:(XMPPRoster *)sender didReceivePresenceSubscriptionRequest:(XMPPPresence *)presence{
+    DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+}
+- (void)xmppRoster:(XMPPRoster *)sender didReceiveBuddyRequest:(XMPPPresence *)presence
+{
+	DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+	XMPPUserCoreDataStorageObject *user = [xmppRosterStorage userForJID:[presence from]
+	                                                         xmppStream:xmppStream
+	                                               managedObjectContext:[self managedObjectContext_roster]];
+	NSString *displayName = [user displayName];
+	NSString *jidStrBare = [presence fromStr];
+	NSString *body = nil;
+	if (![displayName isEqualToString:jidStrBare])
+	{
+		body = [NSString stringWithFormat:@"Buddy request from %@ <%@>", displayName, jidStrBare];
+	}
+	else
+	{
+		body = [NSString stringWithFormat:@"Buddy request from %@", displayName];
+	}
+	
+	
+	if ([[UIApplication sharedApplication] applicationState] == UIApplicationStateActive)
+	{
+		UIAlertView *alertView = [[UIAlertView alloc] initWithTitle:displayName
+		                                                    message:body
+		                                                   delegate:nil
+		                                          cancelButtonTitle:@"Not implemented"
+		                                          otherButtonTitles:nil];
+		[alertView show];
+	}
+	else
+	{
+		// We are not active, so use a local notification instead
+		UILocalNotification *localNotification = [[UILocalNotification alloc] init];
+		localNotification.alertAction = @"Not implemented";
+		localNotification.alertBody = body;
+		
+		[[UIApplication sharedApplication] presentLocalNotificationNow:localNotification];
+	}
+	
+}
+- (void)xmppRoster:(XMPPRoster *)sender didReceiveRosterItem:(NSXMLElement *)item{
+    DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+
+}
+
+#pragma mark - 添加好友，删除好友
+
+- (void)acceptPresenceSubscriptionRequestFrom:(XMPPJID *)jid andAddToRoster:(BOOL)flag
+{
+	// This is a public method, so it may be invoked on any thread/queue.
+	
+	// Send presence response
+	//
+	// <presence to="bareJID" type="subscribed"/>
+	
+	XMPPPresence *presence = [XMPPPresence presenceWithType:@"subscribed" to:[jid bareJID]];
+	[xmppStream sendElement:presence];
+	
+	// Add optionally add user to our roster
+	
+	if (flag)
+	{
+		[xmppRoster addUser:jid withNickname:nil groups:@[kDefaultGroupName]];
+	}
+}
+
+//添加好友
+- (void)AddFriend:(NSString *)name{
+    NSString * XMPPHOST=XMPP_HOST_DOMAIN;
+    XMPPJID *jid = [XMPPJID jidWithString:[NSString stringWithFormat:@"%@@%@",name,XMPPHOST]];
+    [xmppRoster subscribePresenceToUser:jid];
+}
+//添加分组好友
+- (void)AddFriendWith:(NSString *)aName andGroup:(NSString *)aGroup{
+    NSString * XMPPHOST=XMPP_HOST_DOMAIN;
+    XMPPJID *jid = [XMPPJID jidWithString:[NSString stringWithFormat:@"%@@%@",aName,XMPPHOST]];
+    NSArray * groupAry = nil;
+    if (aGroup) {
+        groupAry =@[aGroup];
+    }
+    self.currentAddedGroup=groupAry;
+    [xmppRoster addUser:jid withNickname:nil groups:groupAry];
+}
+
+//删除好友
+- (void)removeFriend:(NSString *)name{
+    NSString * XMPPHOST=XMPP_HOST_DOMAIN;
+    XMPPJID *jid = [XMPPJID jidWithString:[NSString stringWithFormat:@"%@@%@",name,XMPPHOST]];
+    [[self xmppRoster] removeUser:jid];
+    // 删除好友后，清除对应的好友消息。
+    [self.imMessageStorage removeRecentMessageWithBareJID:[jid bare]];
+    [self.imMessageStorage removeMessageWithBareJID:[jid bare]];
+}
+
+//修改昵称
+-(void)changeNickNameByJID:(XMPPJID *)jid useNickName:(NSString *)name andGroups:(NSString *)aGroup
+{
+//    if ([aGroup isEqualToString:kDefaultGroupName]) {
+//        aGroup=nil;
+//    }
+    NSArray * groupAry = nil;
+    if (aGroup) {
+        groupAry =@[aGroup];
+    }
+    [[self xmppRoster] addUser:jid withNickname:name groups:groupAry subscribeToPresence:NO];
+}
+
+#pragma mark - About JID
+- (NSString*)getFullJID:(NSString*) jID{
+    if ([jID rangeOfString:@"@"].location == NSNotFound) {
+        jID = [NSString stringWithFormat:@"%@@%@/%@", jID, XMPP_HOST_DOMAIN,XMPP_HOST_RESOURCE];
+    }
+    return jID;
+}
+
+- (BOOL)setJID{
+    return [self setJID:nil withPassword:nil];
+}
+- (BOOL)setJID:(NSString*)jID withPassword:(NSString*)pwd{
+    //从本地取得用户名，密码和服务器地址
+	NSString *myJID = nil;
+	NSString *myPassword = nil;
+    
+    if (jID) {
+        myJID = [self getFullJID:jID];
+    }else{
+        myJID = [self getFullJID:[[NSUserDefaults standardUserDefaults] stringForKey:kXMPPmyJID]];
+    }
+    if (pwd) {
+        myPassword = pwd;
+    }else{
+        myPassword = [[NSUserDefaults standardUserDefaults] stringForKey:kXMPPmyPassword];
+    }
+    
+	// If you don't want to use the Settings view to set the JID,
+	// uncomment the section below to hard code a JID and password.
+	//
+	// myJID = @"user@gmail.com/xmppframework";
+	// myPassword = @"";
+	
+	if (myJID == nil || myPassword == nil) {
+		return NO;
+	}
+    
+    //设置用户密码
+	[xmppStream setMyJID:[XMPPJID jidWithString:myJID]];
+	password = myPassword;
+    return YES;
+}
+
+#pragma mark - 功能
+/**
+ *  功能:tab下面消息上加上通知的下标
+ */
+-(void)addTbcBadgeNum{
+    int num=0;
+    num=[[NotificationDataHelp sharedNotificationDataHelp] currentNotificationBadgeNum];
+    [[NotificationDataHelp sharedNotificationDataHelp]saveNotificationBadgeNum:num+1];
+    AppDelegate * del=(AppDelegate *)[UIApplication sharedApplication].delegate;
+    RLTBC * tbc=del.tabVC;
+    NSString * badgeNum=[tbc currentBadgeNum];
+    if (!badgeNum) {
+        [tbc setBadgeNum:[NSString stringWithFormat:@"%d",[[NotificationDataHelp sharedNotificationDataHelp] currentNotificationBadgeNum]]];
+    }else{
+        [tbc setBadgeNum:[NSString stringWithFormat:@"%d",badgeNum.intValue+[[NotificationDataHelp sharedNotificationDataHelp] currentNotificationBadgeNum]]];
+    }
+    
+}
+/**
+ *  功能:添加本地通知
+ */
+
+-(void)addLocalNotificationWith:(NotificationRequest *)aRequest{
+    if ([[UIApplication sharedApplication] applicationState] == UIApplicationStateBackground){
+        UILocalNotification *localNotification = [[UILocalNotification alloc] init];
+        NSString * presenceFromUser=aRequest.jid.user;
+        NSString * info;
+        if (aRequest.requestType==1) {//好友
+            info=@"请求加你为好友";
+        } else {
+            info=@"请求加群";
+        }
+        NSString * message=[NSString stringWithFormat:@"%@%@!",presenceFromUser,info];
+        localNotification.alertBody = message;
+        localNotification.alertAction = @"打开";
+        NSDate * now=[NSDate date];
+        localNotification.fireDate=[now dateByAddingTimeInterval:10];
+        localNotification.repeatInterval=0;
+        localNotification.timeZone=[NSTimeZone defaultTimeZone];
+        AppDelegate * del=(AppDelegate *)[UIApplication sharedApplication].delegate;
+        del.pushNum+=1;
+        localNotification.applicationIconBadgeNumber=del.pushNum;
+        localNotification.soundName=UILocalNotificationDefaultSoundName;
+        [[UIApplication sharedApplication] presentLocalNotificationNow:localNotification];
+    }
+}
+
+#pragma mark - Sync friend list
+- (void)getFriendList{
+    [RLFriendLogic getFriendListWithUsername:[xmppStream.myJID user] success:^(NSArray *friendsArr){
+        [RLFriend MR_truncateAll];
+        for (NSDictionary * friendDic in friendsArr) {
+            RLFriend *friend = [RLFriend MR_createEntity];
+            if ([friend MR_importValuesForKeysWithObject:friendDic]) {
+//                DDLogVerbose(@"%@",friend);
+                friend.username = [[friend.jid componentsSeparatedByString:@"@"] objectAtIndex:0];
+                friend.remark = [friendDic objectForKey:@"nickName"];
+                [friend.managedObjectContext MR_saveOnlySelfAndWait];
+            }
+        }
+
+    } failure:^(id json){
+        DDLogError(@"%@",json);
+    }];
+}
+#pragma mark -
+-(void)joinAllRoom
+{
+    XMPPJID * jid= xmppStream.myJID;
+    [[RLGroupLogic sharedRLGroupLogic] getGroupListByName:[jid bare] success:^(id json) {
+        [RLRoom MR_truncateAll];
+        __block XMPPRoomManager *xmppRoomManager = nil;
+        NSDictionary * dic=(NSDictionary *)json;
+        NSArray *roomList=[dic objectForKey:@"mucroomVos"];
+        // 将群信息写入数据库
+        [MagicalRecord saveWithBlock:^(NSManagedObjectContext *localContext){
+            for (int i = 0; i < roomList.count; i++) {
+                NSString *roomJid = [roomList[i] objectForKey:@"roomJid"];
+                XMPPJID *roomJID=[XMPPJID jidWithString:roomJid];
+                xmppRoomManager = [[XMPPRoomManager alloc] init];
+                [xmppRoomManager joinRoomWithJid:roomJID andType:0];
+                
+                // 将群信息写入数据库
+                RLRoom *room = [RLRoom MR_createInContext:localContext];
+                [room setValuesForKeysWithDictionary:roomList[i]];
+            }
+        }];
+
+    } failure:^(NSError *err) {
+        
+    }];
+}
+
+-(void)changeNicknameInRooms:(NSString*)newName withOldName:(NSString *)oldName{
+    XMPPJID * jid= xmppStream.myJID;
+    [[RLGroupLogic sharedRLGroupLogic] getGroupListByName:[jid bare] success:^(id json) {
+        NSDictionary * dic=(NSDictionary *)json;
+        NSArray *roomList=[dic objectForKey:@"mucroomVos"];
+        for (int i = 0; i < roomList.count; i++) {
+            NSString *roomJid = [roomList[i] objectForKey:@"roomJid"];
+            XMPPJID *roomJID=[XMPPJID jidWithString:roomJid];
+            XMPPRoomManager *xmppRoomManager = [[XMPPRoomManager alloc] init];
+            [xmppRoomManager changeNickname:newName withOldNickname:oldName withXMPPJID:roomJID];
+        }
+    } failure:^(NSError *err) {
+        
+    }];
+
+}
+
+#pragma mark - Create default group for friend list
+-(void)createDefaultGroup{
+//    XMPPGroupCoreDataStorageObject *group = [XMPPGroupCoreDataStorageObject];
+}
+@end

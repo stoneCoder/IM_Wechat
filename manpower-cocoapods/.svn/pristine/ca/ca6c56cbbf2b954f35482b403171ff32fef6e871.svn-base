@@ -1,0 +1,52 @@
+//
+//  RLRoomLogic.h
+//  manpower
+//
+//  Created by WangShunzhou on 14-9-24.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import "RLBaseLogic.h"
+
+@interface RLRoomLogic : RLBaseLogic
+/**
+ *  创建群
+ *
+ *  @param roomName   群名称
+ *  @param userJIDStr 当前用户（群主）的JID
+ *  @param description 群公告
+ *  @param subject    群标签
+ *  @param view       当前view，出现错误会显示在当前view上
+ *  @param success
+ *  @param failure
+ 
+ 
+ http://192.168.102.164:9090/plugins/ofroomplugin/ofroomplugin?subdomain=conference&type=createRoom&userJID=liufuhai0104@hanmin&naturalName=baidu
+ */
++(void)createRoom:(NSString*)roomName
+      withUserJID:(NSString*)userJIDStr
+  withDescription:(NSString*)description
+      withSubject:(NSString*)subject
+  withNaturalName:(NSString*)naturalName
+         withView:(UIView*)view
+          success:(void(^)(id responseObject))success
+          failure:(void(^)(id responseObject))failure;
+
+
+
++(void)updateRoom:(NSString*)roomName
+      withUserJID:(NSString*)userJIDStr
+  withDescription:(NSString*)description
+      withSubject:(NSString*)subject
+  withNaturalName:(NSString*)naturalName
+         withView:(UIView*)view
+          success:(void(^)(id responseObject))success
+          failure:(void(^)(id responseObject))failure;
+
++(void)updatePhoto:(NSString*)filePath
+        withRoomID:(NSString*)roomID
+          withView:(UIView*)view
+           success:(void(^)(id responseObject))success
+           failure:(void(^)(id responseObject))failure;
+
+@end

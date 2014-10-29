@@ -1,0 +1,336 @@
+//
+//  RLMessagesListVC.m
+//  manpower
+//
+//  Created by hanjin on 14-6-9.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import "RLMessagesListVC.h"
+#import "XMPPManager.h"
+#import "IMMessageStorage.h"
+#import "IMMessageRecent.h"
+#import "IMMessageRecentCell.h"
+#import "RLSendMessageVC.h"
+#import "RLTBC.h"
+#import "AppDelegate.h"
+#import "NotificationDataHelp.h"
+
+static NSString *recentCellIdentifier = @"IMMessageRecentCell";
+
+@interface RLMessagesListVC ()<SWTableViewCellDelegate>
+{
+    XMPPStream *xmppStream;
+    NSFetchedResultsController *fetchedResultsController;
+    IMMessageStorage *imMessageStorage;
+    int totalMsgNum;
+    RLSendMessageVC *sendMsgVC;
+    UIRefreshControl *refreshControl;
+}
+@end
+
+@implementation RLMessagesListVC
+
+- (id)initWithNibName:(NSString *)nibNameOrNil bundle:(NSBundle *)nibBundleOrNil
+{
+    self = [super initWithNibName:nibNameOrNil bundle:nibBundleOrNil];
+    if (self) {
+        xmppStream = [XMPPManager sharedInstance].xmppStream;
+        imMessageStorage = [XMPPManager sharedInstance].imMessageStorage;
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(resetFetchedResultsController:) name:NOFITICATION_LOG_OUT object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(changeNickname:) name:NOFITICATION_CHANGE_FRIEND_NICKNAME object:nil];
+    }
+    return self;
+}
+
+-(void)viewWillAppear:(BOOL)animated{
+    [super viewWillAppear:animated];
+    [self updateBadgeNum];
+    [self.tableView reloadData];
+    imMessageStorage.bareJID = @"";
+}
+
+- (void)viewDidLoad
+{
+    [super viewDidLoad];
+    self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
+    self.tableView.showsVerticalScrollIndicator=NO;
+    self.tableView.showsHorizontalScrollIndicator=NO;
+    UINib *recentCellNib = [UINib nibWithNibName:@"IMMessageRecentCell" bundle:[NSBundle mainBundle]];
+    [self.tableView registerNib:recentCellNib forCellReuseIdentifier:recentCellIdentifier];
+    
+    refreshControl = [[UIRefreshControl alloc] init];
+    refreshControl.attributedTitle = [[NSAttributedString alloc] initWithString:@"下拉刷新"];
+
+    [refreshControl addTarget:self action:@selector(handleRefresh:) forControlEvents:UIControlEventValueChanged];
+//    [self.tableView insertSubview:refreshControl belowSubview:self.tableView];
+//    [self.view addSubview:refreshControl];
+}
+
+-(void)handleRefresh:(id)sender{
+    NSLog(@"handle");
+    refreshControl.attributedTitle = [[NSAttributedString alloc] initWithString:@"刷新中"];
+
+    dispatch_time_t popTime = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC));
+    dispatch_after(popTime, dispatch_get_main_queue(), ^(void){
+        //刷新结束时刷新控件的设置
+        [refreshControl endRefreshing];
+        refreshControl.attributedTitle = [[NSAttributedString alloc] initWithString:@"下拉刷新"];
+
+    });
+}
+#pragma mark - Private
+
+-(void)updateBadgeNum{
+    id <NSFetchedResultsSectionInfo> sectionInfo = [[[self fetchedResultsController] sections] objectAtIndex:0];
+    NSArray * recentMsgArr =[sectionInfo objects];
+    NSNumber *msgNum = [recentMsgArr valueForKeyPath:@"@sum.unreadMsgNum"];
+    totalMsgNum = [msgNum intValue];
+    if ([sendMsgVC canPerformAction:@selector(setReturnBtnTitle:BadgeNumber:) withSender:self]) {
+        [sendMsgVC setReturnBtnTitle:@"消息" BadgeNumber:totalMsgNum];
+    }
+    int num = [[NotificationDataHelp sharedNotificationDataHelp] currentNotificationBadgeNum];
+    totalMsgNum += num;
+    RLTBC *tabbar = [(AppDelegate*)[[UIApplication sharedApplication] delegate] tabVC];
+    if (totalMsgNum>0) {
+        [tabbar setBadgeNum:[NSString stringWithFormat:@"%d",totalMsgNum]];
+    }else{
+        [tabbar setBadgeNum:nil];
+    }
+//    DDLogVerbose(@"=============================================");
+//    DDLogVerbose(@"总共未读消息:%d",totalMsgNum);
+//    DDLogVerbose(@"=============================================");
+}
+
+#pragma mark -  UITableView dataSource
+-(NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section{
+    NSArray *sections = [[self fetchedResultsController] sections];
+    if (section < [sections count])
+    {
+        id <NSFetchedResultsSectionInfo> sectionInfo = [sections objectAtIndex:section];
+        return sectionInfo.numberOfObjects;
+    }
+    return 0;
+}
+
+-(CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath{
+    return 74;
+}
+
+-(UITableViewCell*)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath{
+    IMMessageRecent *message = [[self fetchedResultsController] objectAtIndexPath:indexPath];
+    IMMessageRecentCell *cell = [tableView dequeueReusableCellWithIdentifier:recentCellIdentifier];
+    BOOL isTopped = message.order > 0;
+    [cell configureCellWithRecentMessage:message];
+    
+    cell.rightUtilityButtons = [self cellRightButtons:isTopped];
+    cell.delegate = self;
+    cell.containingTableView = tableView;
+    [cell hideUtilityButtonsAnimated:NO];
+    
+    [cell setCellHeight:cell.frame.size.height];
+    
+    cell.selectionStyle = UITableViewCellSelectionStyleNone;
+
+    if (isTopped) {
+        cell.backgroundColor = UIColorFromRGB(0xfffafa);
+    }else{
+        cell.backgroundColor = UIColorFromRGB(0xffffff);
+    }
+    cell.contentView.backgroundColor = cell.backgroundColor;
+    
+    //    UIView *cellBackgroundView = [[UIView alloc] initWithFrame:cell.frame];
+    //    cellBackgroundView.backgroundColor = UIColorFromRGB(0xf0f1f2);
+    //    cell.selectedBackgroundView = cellBackgroundView;
+    return cell;
+}
+
+#pragma mark - Private
+/**
+ *  Cell滑动按钮
+ *
+ *  @return NSArray
+ */
+- (NSArray *)cellRightButtons:(BOOL)isTopped
+{
+    NSMutableArray *rightUtilityButtons = [NSMutableArray array];
+    NSString *firstButtonStr = isTopped ? @"取消置顶":@"置顶";
+    
+    [rightUtilityButtons sw_addUtilityButtonWithColor:UIColorFromRGB(0xcccccc) title:firstButtonStr];
+    [rightUtilityButtons sw_addUtilityButtonWithColor:UIColorFromRGB(0xff2222) title:@"删除"];
+    
+    return rightUtilityButtons;
+}
+
+/**
+ *  置顶最近联系人
+ *
+ *  @param indexPath NSIndexPath
+ */
+- (void)topRecentMessage:(NSIndexPath*)indexPath{
+    IMMessageRecent *recent = [self.fetchedResultsController objectAtIndexPath:indexPath];
+    if (recent.order > 0) {
+        recent.order = 0;
+    }else{
+        id <NSFetchedResultsSectionInfo> sectionInfo = [[[self fetchedResultsController] sections] objectAtIndex:0];
+        NSArray * recentMsgArr =[sectionInfo objects];
+        NSNumber *maxOrder = [recentMsgArr valueForKeyPath:@"@max.order"];
+        NSInteger newOrder = maxOrder.integerValue + 1;
+        recent.order = newOrder;
+    }
+    [recent save];
+}
+
+/**
+ *  删除最近联系人
+ *
+ *  @param indexPath NSIndexPath
+ */
+- (void)deleteRecentMessage:(NSIndexPath*)indexPath{
+    // Delete the managed object.
+    NSManagedObjectContext *context = [self.fetchedResultsController managedObjectContext];
+    [context deleteObject:[self.fetchedResultsController objectAtIndexPath:indexPath]];
+    
+    NSError *error;
+    if (![context save:&error]) {
+        /*
+         Replace this implementation with code to handle the error appropriately.
+         
+         abort() causes the application to generate a crash log and terminate. You should not use this function in a shipping application, although it may be useful during development.
+         */
+        DDLogInfo(@"Unresolved error %@, %@", error, [error userInfo]);
+        abort();
+    }
+}
+
+
+#pragma mark - SWTableViewCell delegate
+- (void)swipeableTableViewCell:(SWTableViewCell *)cell didTriggerRightUtilityButtonWithIndex:(NSInteger)index{
+    switch (index) {
+        case 0:
+            // 置顶
+            [self topRecentMessage: [self.tableView indexPathForCell:cell]];
+            break;
+        case 1:
+            // 删除
+            [self deleteRecentMessage: [self.tableView indexPathForCell:cell]];
+            break;
+    }
+}
+
+- (BOOL)swipeableTableViewCellShouldHideUtilityButtonsOnSwipe:(SWTableViewCell *)cell{
+    return YES;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+#pragma mark - UITableView delegate
+///////////////////////////////////////////////////////////////////////////////
+-(void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath{
+    IMMessageRecent *message = [[self fetchedResultsController] objectAtIndexPath:indexPath];
+    totalMsgNum -= message.unreadMsgNum;
+    
+    sendMsgVC = [[RLSendMessageVC alloc] init];
+    sendMsgVC.friendJID = [XMPPJID jidWithString:message.bareJID];
+    sendMsgVC.type = message.type;
+    sendMsgVC.badgeNum = totalMsgNum;
+    [self.navigationController pushViewController:sendMsgVC animated:YES];
+//    [sendMsgVC setReturnBtnTitle:@"消息" BadgeNumber:totalMsgNum];
+
+    message.unreadMsgNum = 0;
+    [message save];
+}
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+#pragma mark - FetchedResultsController
+///////////////////////////////////////////////////////////////////////////////
+-(NSFetchedResultsController*)fetchedResultsController{
+    if (fetchedResultsController == nil)
+	{
+		NSManagedObjectContext *moc = imMessageStorage.mainThreadManagedObjectContext;
+		
+		NSEntityDescription *entity = [NSEntityDescription entityForName:@"IMMessageRecent"
+		                                          inManagedObjectContext:moc];
+        
+        NSSortDescriptor *sd1 = [[NSSortDescriptor alloc] initWithKey:@"order" ascending:NO];
+        NSSortDescriptor *sd2 = [[NSSortDescriptor alloc] initWithKey:@"timestamp" ascending:NO];
+		
+		NSArray *sortDescriptors = [NSArray arrayWithObjects:sd1, sd2, nil];
+		
+        NSPredicate *predidate = [NSPredicate predicateWithFormat:@" myBareJID == %@ ",xmppStream.myJID.bare];
+        
+		NSFetchRequest *fetchRequest = [[NSFetchRequest alloc] init];
+		[fetchRequest setEntity:entity];
+		[fetchRequest setSortDescriptors:sortDescriptors];
+        [fetchRequest setPredicate:predidate];
+//		[fetchRequest setFetchBatchSize:10];
+		
+		fetchedResultsController = [[NSFetchedResultsController alloc] initWithFetchRequest:fetchRequest
+                                                                              managedObjectContext:moc
+                                                                                sectionNameKeyPath:nil
+                                                                                         cacheName:nil];
+		[fetchedResultsController setDelegate:self];
+		
+		
+		NSError *error = nil;
+		if (![fetchedResultsController performFetch:&error])
+		{
+			DDLogError(@"Error performing fetch: %@", error);
+		}
+        
+	}
+    
+    return fetchedResultsController;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+#pragma mark - FetchedResultsController Delegate
+///////////////////////////////////////////////////////////////////////////////
+-(void)controller:(NSFetchedResultsController *)controller didChangeObject:(id)anObject atIndexPath:(NSIndexPath *)indexPath forChangeType:(NSFetchedResultsChangeType)type newIndexPath:(NSIndexPath *)newIndexPath{
+    DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+//    IMMessageRecent *message = anObject;
+//    totalMsgNum = 0;
+    [self.tableView reloadData];
+    [self updateBadgeNum];
+}
+
+#pragma mark - 
+-(void)resetFetchedResultsController:(NSNotification*)notification{
+    fetchedResultsController.delegate = nil;
+    fetchedResultsController = nil;
+}
+
+-(void)changeNickname:(NSNotification*)notification{
+    NSString *nickname = [[notification userInfo] objectForKey:@"nickname"];
+    NSString *friendJID = [[notification userInfo] objectForKey:@"jid"];
+    
+    NSManagedObjectContext *moc = imMessageStorage.mainThreadManagedObjectContext;
+    
+    NSEntityDescription *entity = [NSEntityDescription entityForName:@"IMMessageRecent"
+                                              inManagedObjectContext:moc];
+    
+    NSSortDescriptor *sd1 = [[NSSortDescriptor alloc] initWithKey:@"timestamp" ascending:NO];
+    
+    NSArray *sortDescriptors = [NSArray arrayWithObjects:sd1, nil];
+    
+    NSPredicate *predidate = [NSPredicate predicateWithFormat:@" myBareJID == %@ AND bareJID == %@",xmppStream.myJID.bare,friendJID];
+    
+    NSFetchRequest *fetchRequest = [[NSFetchRequest alloc] init];
+    [fetchRequest setEntity:entity];
+    [fetchRequest setSortDescriptors:sortDescriptors];
+    [fetchRequest setPredicate:predidate];
+    
+    NSError *err = nil;
+    NSArray *arr = [moc executeFetchRequest:fetchRequest error:&err];
+    if (err) {
+        DDLogError(@"%@",err);
+        return;
+    }
+    if ([arr count]) {
+        IMMessageRecent *recentMessage = [arr objectAtIndex:0];
+        recentMessage.nickname = nickname;
+        [recentMessage save];
+    }
+}
+@end

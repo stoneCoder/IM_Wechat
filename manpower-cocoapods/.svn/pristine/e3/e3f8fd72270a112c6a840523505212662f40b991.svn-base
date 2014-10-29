@@ -1,0 +1,29 @@
+//
+//  RLRoom.m
+//  manpower
+//
+//  Created by WangShunzhou on 14-9-25.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import "RLRoom.h"
+
+
+@implementation RLRoom
+
+@dynamic roomDescription;
+@dynamic roomNaturalLanguageName;
+@dynamic roomSubject;
+@dynamic roomJid;
+@dynamic type;
+@dynamic photo;
+@dynamic roomID;
+@dynamic owner;
+@dynamic onlineCount;
+@dynamic ownerName;
+@dynamic sum;
+@dynamic roomName;
+
+-(void)setValue:(id)value forUndefinedKey:(NSString *)key{}
+
+@end

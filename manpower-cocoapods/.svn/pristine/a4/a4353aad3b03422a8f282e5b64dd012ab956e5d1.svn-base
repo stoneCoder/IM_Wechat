@@ -1,0 +1,110 @@
+//
+//  FriendListCell.m
+//  manpower
+//
+//  Created by hanjin on 14-6-18.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import "FriendListCell.h"
+#import <CoreGraphics/CoreGraphics.h>
+@implementation FriendListCell
+
+- (void)awakeFromNib
+{
+    // Initialization code
+    self.picImageView.layer.cornerRadius=self.picImageView.frame.size.width/2;
+    self.picImageView.layer.masksToBounds=YES;
+    self.selectImageView=[[UIImageView alloc] initWithFrame:CGRectMake(280, 16, 18, 18)];
+    [self.selectImageView setImage:[UIImage imageNamed:@"group_add"]];
+    [self addSubview:self.selectImageView];
+    self.selectImageView.hidden=YES;
+}
+
+- (void)setSelected:(BOOL)selected animated:(BOOL)animated
+{
+    [super setSelected:selected animated:animated];
+
+    // Configure the view for the selected state
+}
+#pragma mark - 更新cell
+-(void)updateCellWithUserStorage:(XMPPUserCoreDataStorageObject *)aUser{
+    if (aUser.nickname) {
+        self.nameLab.text=aUser.nickname;
+    } else {
+        self.nameLab.text=aUser.jid.user;
+    }
+    
+    [self configurePhotoWithUser:aUser];
+}
+-(void)updateGroupAddCellWithUserStorage:(XMPPUserCoreDataStorageObject *)aUser{
+    self.isSelected=NO;
+    self.selectImageView.hidden=NO;
+    
+    if (aUser.nickname) {
+        self.nameLab.text=aUser.nickname;
+    } else {
+        self.nameLab.text=aUser.jid.user;
+    }
+    
+    [self configurePhotoWithUser:aUser];
+}
+-(void)updateCellWithGroupVO:(RLGroupVO *)rlGroupVO
+{
+    self.nameLab.text = rlGroupVO.roomName;
+    self.picImageView.image = [UIImage imageNamed:@"defaultGroup"];
+}
+
+#pragma mark - 功能
+/**
+ *  功能:取头像
+ */
+- (void)configurePhotoWithUser:(XMPPUserCoreDataStorageObject *)user
+{
+    UIImage * picImg;
+	if (user.photo != nil)
+	{
+		picImg =user.photo;
+        
+	}
+	else
+	{
+		NSData *photoData = [[[XMPPManager sharedInstance] xmppvCardAvatarModule] photoDataForJID:user.jid];
+        
+		if (photoData != nil)
+			picImg =[UIImage imageWithData:photoData] ;
+		else
+			picImg = [UIImage imageNamed:@"defaultPerson"];
+	}
+    if (user.sectionNum.intValue==0 || user.sectionNum.intValue==1) {
+        self.picImageView.image=picImg;
+    } else {//离线
+        self.picImageView.image=[self getGrayImage:picImg];
+    }
+}
+/**
+ *  功能:离线时，图像置灰
+ */
+
+-(UIImage*)getGrayImage:(UIImage*)sourceImage
+{
+    int width = sourceImage.size.width;
+    int height = sourceImage.size.height;
+    
+    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceGray();
+    CGContextRef context = CGBitmapContextCreate (nil,width,height,8,0,colorSpace,(CGBitmapInfo)kCGImageAlphaNone);
+    CGColorSpaceRelease(colorSpace);
+    
+    if (context == NULL) {
+        return nil;
+    }
+    
+    CGContextDrawImage(context,CGRectMake(0, 0, width, height), sourceImage.CGImage);
+    CGImageRef grayImageRef = CGBitmapContextCreateImage(context);
+    UIImage *grayImage = [UIImage imageWithCGImage:grayImageRef];
+    CGContextRelease(context);
+    CGImageRelease(grayImageRef);
+    
+    return grayImage;
+}
+@end

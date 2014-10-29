@@ -1,0 +1,185 @@
+//
+//  XMPPLoginManager.m
+//  manpower
+//
+//  Created by WangShunzhou on 14-8-13.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import "XMPPConnnectionManager.h"
+#import "RNEncryptor.h"
+#import "RNDecryptor.h"
+#import "XMPPManager.h"
+#import "UIView+UIViewExt.h"
+#import "AppDelegate.h"
+#import "RLMyInfo.h"
+#import "XMPPvCardTemp.h"
+#import "JSONKit.h"
+#import "AppDelegate.h"
+
+@interface XMPPConnnectionManager (){
+    XMPPManager *xmppManager;
+    XMPPStream *xmppStream;
+    UIViewController *currentVC;
+    RLMyInfo *myInfo;
+}
+
+@end
+
+@implementation XMPPConnnectionManager
+DEFINE_SINGLETON_FOR_CLASS(XMPPConnnectionManager)
+
+-(id)init{
+    self = [super init];
+    if (self) {
+        xmppManager = [XMPPManager sharedInstance];
+        xmppStream = xmppManager.xmppStream;
+        [xmppStream addDelegate:self delegateQueue:dispatch_get_main_queue()];
+        if (![xmppStream isConnected]) {
+            XMPPJID *jid = xmppStream.myJID;
+            if (jid == nil) {
+                jid = [XMPPJID jidWithString:[NSString stringWithFormat:@"%@@%@/%@",@"",XMPP_HOST_DOMAIN,XMPP_HOST_RESOURCE]];
+                [xmppStream setMyJID:jid];
+            }
+            [xmppManager connect];
+        }
+        myInfo = [RLMyInfo sharedRLMyInfo];
+        [myInfo loadUserData];
+        self.username = myInfo.username;
+        self.password = myInfo.password;
+    }
+    return self;
+}
+
+-(UIViewController*)currentVC{
+    currentVC = [[UIApplication sharedApplication] keyWindow].rootViewController;
+    
+    return currentVC;
+}
+
+
+#pragma mark - Public API
+/**
+ *  登陆
+ *  
+ *  @abstract 如果已经连接到XMPP服务器，直接认证。否则，先连接，连接成功后，再认证。
+ *
+ */
+-(void)login{
+    
+    [[self currentVC].view hideAllHUD];
+    [[self currentVC].view showHUD:@"正在连接服务器..."];
+    if (![xmppManager connect] ) {
+        DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+        [[self currentVC].view hideAllHUD];
+        [[self currentVC].view showStringHUD:@"服务器断开连接，请重试..." second:2];
+    } else if(xmppStream.isConnected){
+        [[self currentVC].view hideAllHUD];
+        [[self currentVC].view showHUD:@"正在认证..."];
+        [self doAuthenticate];
+    }
+
+}
+
+#pragma mark - Private API
+
+/**
+ *  认证
+ */
+-(void)doAuthenticate{
+    NSError *err = nil;
+    [xmppStream authenticateWithPassword:_password error:&err];
+    if (err) {
+        DDLogError(@"%@", err);
+    }
+}
+
+#pragma mark - XMPPStream Delegate
+
+- (void)xmppStreamDidConnect:(XMPPStream *)sender
+{
+	DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+    
+    if (_loginFlag) {
+        [[self currentVC].view hideAllHUD];
+        [[self currentVC].view showHUD:@"正在认证..."];
+        
+        [self doAuthenticate];
+    }
+    
+}
+
+- (void)xmppStreamDidDisconnect:(XMPPStream *)sender withError:(NSError *)error
+{
+	DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+    if (_loginFlag) {
+        [[self currentVC].view hideHUD];
+        [[self currentVC].view showStringHUD:@"连接中断" second:3];
+    }
+}
+
+- (void)xmppStreamDidAuthenticate:(XMPPStream *)sender{
+    [[self currentVC].view hideAllHUD];
+    
+    // 换账号登陆时，更新Libaray中的文件。
+    myInfo.username = self.username;
+    myInfo.password = self.password;
+    [myInfo saveUserData];
+    [myInfo getUserInfoFromServer];
+//    [xmppManager.xmppvCardTempModule addDelegate:self delegateQueue:dispatch_get_main_queue()];
+//    [xmppManager.xmppvCardTempModule fetchvCardTempForJID:xmppManager.xmppStream.myJID];
+
+    // 为不同的人建立不同的数据库
+    [MagicalRecord setupCoreDataStackWithStoreNamed:[myInfo.username stringByAppendingPathExtension:@"sqlite"]];
+    [(AppDelegate*)[[UIApplication sharedApplication] delegate] changeToRoot];
+    [xmppManager joinAllRoom];
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.02 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        // 登陆后卡界面的根源在这里。在认证成功后马上上线有一定机率会卡界面(主线程阻塞，界面相应不到任何事件)。卡界面的情况在真机上尚未发现。
+        [xmppManager goOnline];
+    });
+}
+
+- (void)xmppStream:(XMPPStream *)sender didNotAuthenticate:(NSXMLElement *)error{
+    [[self currentVC].view hideAllHUD];
+    [[self currentVC].view showStringHUD:@"用户名/密码错误！" second:2];
+}
+
+#pragma mark - Read / Write user data
+/**
+ *  @abstract 读写本地存储用户账号、密码 上述隐私信息以加密文件的方式存储在本地。
+ 
+-(void)loadUserData:(NSString*)filePath{
+    // 存储在Library路径下，文件名为001.dat。不要取有意义的文件名。
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    NSDictionary *dic;
+    if (![fileManager fileExistsAtPath:filePath]) {
+        [fileManager createFileAtPath:filePath contents:nil attributes:nil];
+    }
+    NSData *data = [NSData dataWithContentsOfFile:filePath];
+    
+    NSError *err = nil;
+    NSData *decryData = [RNDecryptor decryptData:data withSettings:kRNCryptorAES256Settings password:kCryptPwd error:&err];
+    if (err) {
+        NSLog(@"Decrypt error: %@", err);
+    }else{
+        dic = [decryData objectFromJSONData];
+        self.username = [dic objectForKey:@"username"];
+        self.password = [dic objectForKey:@"password"];
+        
+    }
+    
+}
+
+-(void)saveUserData{
+    NSError *err;
+    NSDictionary *dic = @{@"username":_username,@"password":_password};
+    NSData *encryData = [RNEncryptor encryptData:[dic JSONData] withSettings:kRNCryptorAES256Settings password:kCryptPwd error:&err];
+    NSString *filePath = [NSHomeDirectory() stringByAppendingPathComponent:kCryptFilePath];
+    [encryData writeToFile:filePath atomically:YES];
+    if (err) {
+        NSLog(@"Encrypt error: %@", err);
+    }
+}
+ */
+@end

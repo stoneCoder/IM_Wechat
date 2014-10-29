@@ -1,0 +1,15 @@
+//
+//  RLGroupVO.h
+//  manpower
+//
+//  Created by hanjin on 14-6-10.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import "RLBaseVO.h"
+
+@interface RLGroupVO : RLBaseVO
+@property (strong,nonatomic) NSString * roomName;//房间名称
+@property (strong,nonatomic) NSString * roomDescription;//描述
+@property (strong,nonatomic) NSString * roomJid;
+@end

@@ -1,0 +1,36 @@
+//
+//  IMMessageRecent.m
+//  manpower
+//
+//  Created by WangShunzhou on 14-6-24.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import "IMMessageRecent.h"
+#import "XMPPManager.h"
+#import "IMMessageStorage.h"
+
+@implementation IMMessageRecent
+
+@dynamic bareJID;
+@dynamic msg;
+@dynamic msgType;
+@dynamic unreadMsgNum;
+@dynamic timestamp;
+@dynamic type;
+@dynamic uuid;
+@dynamic myBareJID;
+@dynamic nickname;
+@dynamic order;
+@dynamic avatar;
+-(BOOL)save{
+    NSManagedObjectContext *moc =[self managedObjectContext];
+    NSError *err = nil;
+    if (![moc save:&err]) {
+        DDLogError(@"%@",err);
+        [moc rollback];
+        return NO;
+    }
+    return YES;
+}
+@end

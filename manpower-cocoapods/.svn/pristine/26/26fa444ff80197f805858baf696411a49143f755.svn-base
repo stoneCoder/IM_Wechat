@@ -1,0 +1,402 @@
+//
+//  IMMessageVoiceCell.m
+//  manpower
+//
+//  Created by WangShunzhou on 14-6-19.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import "IMMessageVoiceCell.h"
+#import "AFNetworking.h"
+#import "VoiceConverter.h"
+
+#define MSG_VOICE_BAR_WIDTH_MIN 50          // 音频时长为1秒时的宽度
+#define MSG_VOICE_BAR_WIDTH_MAX 220         // 音频时长为60秒时的宽度
+#define MSG_UNREAD_DOT_EDGE 10
+static AVAudioPlayer *player;
+static ZMMessage *currentAudio = nil;
+static UIImageView *s_sendHornIV = nil;
+static UIImageView *s_recvHornIV = nil;
+@interface IMMessageVoiceCell(){
+    UITapGestureRecognizer *singleTap;
+    NSArray *recvHornArr;
+    NSArray *sendHornArr;
+}
+
+@end
+
+@implementation IMMessageVoiceCell
+
+- (id)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier
+{
+    self = [super initWithStyle:style reuseIdentifier:reuseIdentifier];
+    if (self) {
+        self.hornIV = [[UIImageView alloc] initWithFrame:CGRectZero];
+//        self.hornIV.backgroundColor = [UIColor colorWithWhite:1 alpha:1];
+        
+        self.voiceBarIV = [[VoiceBarView alloc] initWithFrame:CGRectZero];
+        self.secondLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+        self.secondLabel.font = [UIFont systemFontOfSize:14];
+        self.secondLabel.textColor = [UIColor colorWithWhite:0.6 alpha:1];
+        self.secondLabel.backgroundColor = [UIColor clearColor];
+        
+        self.unreadIV = [[UIImageView alloc] initWithFrame:CGRectZero];
+        self.unreadIV.backgroundColor = [UIColor colorWithRed:0.8 green:0.4 blue:0.1 alpha:1];
+        self.unreadIV.layer.cornerRadius = MSG_UNREAD_DOT_EDGE * 0.5;
+        self.unreadIV.layer.borderWidth = 1;
+        self.unreadIV.layer.borderColor = [[UIColor colorWithRed:0.5 green:0.2 blue:0.1 alpha:1] CGColor];
+//        self.unreadIV.layer.masksToBounds = YES;
+        self.unreadIV.layer.shouldRasterize = YES;
+        self.unreadIV.layer.rasterizationScale = [[UIScreen mainScreen] scale];
+        [self.unreadIV setImage:nil];
+        
+        [self.containerView addSubview:self.voiceBarIV];
+        [self.containerView addSubview:self.hornIV];
+        [self addSubview:self.secondLabel];
+        [self addSubview:self.unreadIV];
+        
+        singleTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(soundClicked:)];
+        
+//        recvHornArr = @[[UIImage imageNamed:@""],[UIImage imageNamed:@""],[UIImage imageNamed:@""]];
+//        sendHornArr = @[[UIImage imageNamed:@""],[UIImage imageNamed:@""],[UIImage imageNamed:@""]];
+    }
+    return self;
+}
+
+
+-(void)configureWithMessage:(ZMMessage*)message withMyPhoto:(UIImage*)myPhoto withFriendPhoto:(UIImage*)friendPhoto withIndexPath:(NSIndexPath*)indexPath{
+    [self preConfigureCell:message];
+    
+    CGRect sentPhotoViewFrame = MSG_SENT_PHOTO_FRAME;
+    CGRect recvPhotoViewFrame = MSG_RECV_PHOTO_FRAME;
+    
+    // 未读消息标记
+    CGRect unreadIVFrame = CGRectMake(0, MSG_CELL_TOP_PADDING, MSG_UNREAD_DOT_EDGE, MSG_UNREAD_DOT_EDGE);
+    
+    
+    NSInteger sec = [message.desc integerValue];
+    if (sec == 0) {
+        sec = 1;
+    }
+    CGFloat width = [self getVoiceBarWidth:sec];
+    CGFloat posY = (MSG_ROW_HEIGHT_DEFAULT - MSG_PHOTO_EDGE) * 0.5;
+    
+    if (self.shouldShowTimeLabel) {
+        posY += MSG_TIME_LABEL_HEIGHT;
+        sentPhotoViewFrame.origin.y += MSG_TIME_LABEL_HEIGHT;
+        recvPhotoViewFrame.origin.y += MSG_TIME_LABEL_HEIGHT;
+        unreadIVFrame.origin.y += MSG_TIME_LABEL_HEIGHT;
+
+    }
+    if ([message isGroupChat]) {
+        posY += MSG_NICKNAME_LABEL_HEIGHT;
+        unreadIVFrame.origin.y += MSG_NICKNAME_LABEL_HEIGHT;
+    }
+    
+    CGRect sentImageViewFrame = CGRectMake(0, 0, width, 40);
+    CGRect sentContainerViewFrame = CGRectMake(320 - MSG_PHOTO_EDGE - MSG_TEXT_MARGIN_H * 2 - width, posY, width, MSG_PHOTO_EDGE);
+    
+    CGRect recvImageViewFrame = CGRectMake(0, 0, width, 40);
+    CGRect recvContainerViewFrame = CGRectMake(MSG_RECV_CONTAINER_X, posY, width, MSG_PHOTO_EDGE);
+
+    
+    CGFloat hornWidth = 14;
+    CGFloat hornHeight = 20;
+    
+    CGRect sentHornFrame = CGRectMake(sentContainerViewFrame.size.width - hornWidth - MSG_BUBBLE_LENGTH - MSG_TEXT_MARGIN_H, 10, hornWidth, hornHeight);
+    CGRect recvHornFrame = CGRectMake(MSG_BUBBLE_LENGTH+MSG_TEXT_MARGIN_H, 10, hornWidth, hornHeight);
+    
+    UIImageView *photoView = self.photoView;
+    VoiceBarView *voiceBar = self.voiceBarIV;
+    UIView *containerView = self.containerView;
+    UILabel *label = self.secondLabel;
+    label.text = [NSString stringWithFormat:@"%@\"",message.desc];
+    [label sizeToFit];
+    CGRect labelFrame = label.frame;
+    labelFrame.origin.y = sentContainerViewFrame.origin.y + 20;
+
+    voiceBar.layer.cornerRadius = 5;
+    voiceBar.layer.masksToBounds = YES;
+    
+    
+    if (message.outgoing) {
+        // 发出的消息
+//        [photoView setImage:myPhoto];
+        if (self.myInfo.localPhoto) {
+            [self.photoView setImage:[UIImage imageWithContentsOfFile:self.myInfo.localPhoto]];
+        }else{
+            NSURL *url = [NSURL URLWithString:self.myInfo.photo];
+            [self.photoView sd_setImageWithURL:url placeholderImage:IMAGE_DEFAULT_PERSON];
+        }
+        [photoView setFrame:sentPhotoViewFrame];
+        
+        [voiceBar setFrame:sentImageViewFrame];
+        voiceBar.backgroundColor = [UIColor clearColor];
+        
+        containerView.layer.borderColor = MSG_CONTAINER_BORDER_COLOR_SENT;
+        [containerView setFrame:sentContainerViewFrame];
+        
+        [self.hornIV setFrame:sentHornFrame];
+        
+        if (currentAudio == message && player.isPlaying) {
+//            DDLogVerbose(@"==============configureWithMessage Send================\nself.hornIV: %@",self.hornIV);
+            [self.hornIV setImage:[UIImage animatedImageNamed:@"horn_send_" duration:0.8]];
+            s_sendHornIV = self.hornIV;
+        }else{
+            [self.hornIV setImage:[UIImage imageNamed:@"horn_send"]];
+        }
+
+        labelFrame.origin.x = sentContainerViewFrame.origin.x - (5 + labelFrame.size.width);
+        
+    }else{
+        // 收到的消息
+//        [photoView setImage:friendPhoto];
+        NSURL *url = [NSURL URLWithString:self.friendInfo.photo];
+        [self.photoView sd_setImageWithURL:url placeholderImage:IMAGE_DEFAULT_PERSON];
+        
+        [photoView setFrame:recvPhotoViewFrame];
+        
+        [voiceBar setFrame:recvImageViewFrame];
+        voiceBar.backgroundColor = [UIColor clearColor];
+        
+        containerView.layer.borderColor = MSG_CONTAINER_BORDER_COLOR_RECV;
+        [containerView setFrame:recvContainerViewFrame];
+        
+        [self.hornIV setFrame:recvHornFrame];
+        if (currentAudio == message  && player.isPlaying) {
+//            DDLogVerbose(@"==============configureWithMessage Recv================\nself.hornIV: %@",self.hornIV);
+            [self.hornIV setImage:[UIImage animatedImageNamed:@"horn_recv_" duration:0.8]];
+            s_recvHornIV = self.hornIV;
+        }else{
+            [self.hornIV setImage:[UIImage imageNamed:@"horn_recv"]];
+        }
+        labelFrame.origin.x = recvContainerViewFrame.origin.x + recvContainerViewFrame.size.width + 5;
+        
+        // 收到未读消息，显示标记。
+        unreadIVFrame.origin.x = recvContainerViewFrame.origin.x + recvContainerViewFrame.size.width + 10;
+    }
+    
+    [label setFrame:labelFrame];
+    NSString *fileName;
+    NSString *filePath = message.localFilePath;
+    
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    
+    if (message.unread) {
+        self.unreadIV.hidden = NO;
+        [self.unreadIV setFrame:unreadIVFrame];
+    }else{
+        self.unreadIV.hidden = YES;
+        [self.unreadIV setFrame:CGRectZero];
+    }
+    
+    if (![fileManager fileExistsAtPath:filePath]) {
+        self.shouldUpdateWhileAttrChanged = NO;
+
+        NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:message.msg]];
+        [request addValue:@"application/*" forHTTPHeaderField:@"Accept"];
+        fileName = [[[[message.msg componentsSeparatedByString:@"/"] lastObject] componentsSeparatedByString:@"."] objectAtIndex:0];
+
+        NSString *path = [NSString stringWithFormat:@"%@/%@", VOICE_DIR_PATH,fileName];
+        [IMMessageHelper createDirectory:VOICE_DIR_PATH];
+        
+        AFHTTPRequestOperation *operation = [[AFHTTPRequestOperation alloc] initWithRequest:request];
+        operation.outputStream = [NSOutputStream outputStreamToFileAtPath:path append:NO];
+        __block ZMMessage *msg = message;
+        __weak IMMessageVoiceCell *cell = self;
+        [operation setCompletionBlockWithSuccess:^(AFHTTPRequestOperation *operation, id resposeObject){
+//            DDLogVerbose(@"%@",resposeObject);
+            cell.shouldUpdateWhileAttrChanged = YES;
+            msg.fileName = fileName;
+            msg.localFilePath = path;
+            msg.status = MSG_STATUS_SUCCESS;
+            [msg save];
+        } failure:^(AFHTTPRequestOperation *operation, NSError *err){
+            DDLogError(@"%@",err);
+        }];
+        [operation start];
+        
+    }
+    
+    if (message.outgoing ||
+        (message.status == MSG_STATUS_SUCCESS && !message.outgoing)) {
+        containerView.userInteractionEnabled = YES;
+        [self.voiceBarIV addGestureRecognizer:singleTap];
+        self.voiceBarIV.userInfo = message;
+    }else{
+        [self.voiceBarIV removeGestureRecognizer:singleTap];
+    }
+
+    
+    [super configureCell:message];
+}
+
+/**
+ *  点击音频条，先解压（AMR to WAV）再播放音频。播放完毕后删除WAV文件，以免浪费存储空间。
+ *
+ *  @param sender UITapGestureRecognizer
+ */
+-(void)soundClicked:(id)sender{
+    DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+    UITapGestureRecognizer *tap = (UITapGestureRecognizer*)sender;
+//    CGPoint touchPoint = [tap locationInView:self.tableView];
+    VoiceBarView *voiceBarView = (VoiceBarView*)tap.view;
+    __weak ZMMessage *message = voiceBarView.userInfo;
+    
+    NSString *tmpWavPath = [NSString stringWithFormat:@"%@/%@",TMP_DIR_PATH,[IMMessageHelper getTimestampString]];
+//    NSString *tmpWavPath = [NSString stringWithFormat:@"%@/111.wav",TMP_DIR_PATH];
+    
+    
+    
+    //Todo
+    // 后台线程解压音频，可能在iPhone4, iPod Touch3这样的老设备上有延时，待测试。
+    __weak IMMessageVoiceCell *weakCell = self;
+    dispatch_async(dispatch_get_global_queue(0, 0), ^(){
+//        __strong IMMessageVoiceCell *strongCell = weakCell;
+
+        if (currentAudio == message) {
+            currentAudio = nil;
+            if (player.isPlaying) {
+                [player stop];
+                [weakCell stopHornAnimation];
+                return;
+            }
+        }
+        if (player.isPlaying) {
+            [player stop];
+            [weakCell stopHornAnimation];
+        }
+        currentAudio = message;
+        [VoiceConverter amrToWav:message.localFilePath wavSavePath:tmpWavPath];
+        NSURL *audioFileUrl = [NSURL fileURLWithPath:tmpWavPath];
+        NSError *err;
+        player = [[AVAudioPlayer alloc] initWithContentsOfURL:audioFileUrl error:&err];
+
+        player.delegate = weakCell;
+        if ([player prepareToPlay]) {
+            [player setVolume:1];
+            [player play];
+            [weakCell playHornAnimation];
+//            currentAudioIndex = [strongCell.tableView indexPathForCell:self];
+
+            if (!message.outgoing && message.unread) {
+                dispatch_sync(dispatch_get_main_queue(), ^(){
+                    message.unread = NO;
+                    [message save];
+                });
+                
+            }
+        }else{
+            DDLogError(@"===============Failed to play audio=============\n%@\n%@", audioFileUrl,err);
+        }
+    
+    });
+    
+}
+
+-(void)playHornAnimation{
+    __weak IMMessageVoiceCell *weakCell = self;
+    dispatch_sync(dispatch_get_main_queue(), ^(){
+//        DDLogVerbose(@"=======================play horn=====================\nself.hornIV: %@",weakCell.hornIV);
+        if (weakCell.imMessage.outgoing) {
+            weakCell.hornIV.image = [UIImage animatedImageNamed:@"horn_send_" duration:0.8];
+            s_sendHornIV = weakCell.hornIV;
+        }else{
+            weakCell.hornIV.image = [UIImage animatedImageNamed:@"horn_recv_" duration:0.8];
+            s_recvHornIV = weakCell.hornIV;
+        }
+
+    });
+
+}
+-(void)stopHornAnimation{
+    NSArray *arr = [self.tableView visibleCells];
+    for (UITableViewCell* cell in arr) {
+        if ([cell isKindOfClass:[self class]]) {
+            __block IMMessageVoiceCell *weakCell = (IMMessageVoiceCell*)cell;
+            dispatch_sync(dispatch_get_main_queue(), ^(){
+                if (weakCell.imMessage.outgoing) {
+                    weakCell.hornIV.image = [UIImage imageNamed:@"horn_send"];
+                }else{
+                    weakCell.hornIV.image = [UIImage imageNamed:@"horn_recv"];
+                }
+            });
+
+        }
+    }
+    
+}
+
+/**
+ *  根据音频时长（单位：秒）计算VoiceBar的宽度。宽度模型应该为开口向下的二次函数。
+ *     -b / 2a = 60
+ *     4ac - b^2 / 4a = w2
+ *     a + b + c = w1
+ *     解得：a = (w1 - w2) / 3481
+ *          b = -120 * a
+ *          c = (3600 * w1 - 199 * w2) / 3481
+ *
+ *     y = ( (w1-w2) * x^2 - 120x(w1-w2) + (3600w1 - 119w2) ) / 3481
+ *
+ *  @param NSInteger sec 秒数
+ *  @return CGFloat
+ */
+-(CGFloat)getVoiceBarWidth:(NSInteger)sec{
+    CGFloat width = 0;
+    CGFloat w1 =  MSG_VOICE_BAR_WIDTH_MIN;
+    CGFloat w2 =  MSG_VOICE_BAR_WIDTH_MAX;
+    CGFloat a = (w1 - w2) / 3481;
+    CGFloat b = -120 * a;
+    CGFloat c = w1-a-b;
+//    width = ((w1 - w2) * pow(sec, 2) - (120 * sec * (w1 - w2)) + 3481 * w1 - (w1 + w2) + 120 * (w1-w2)) / 3481;
+    width = a * pow(sec, 2) + b * sec + c;
+    
+    return width + 1;
+}
+
+#pragma mark - AVAudioPlayer delegate
+-(void)audioPlayerDidFinishPlaying:(AVAudioPlayer *)audioPlayer successfully:(BOOL)flag{
+    DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+//    DDLogVerbose(@"self.hornIV: %@",self.hornIV);
+    if (self.imMessage.outgoing) {
+        self.hornIV.image = s_sendHornIV.image = [UIImage imageNamed:@"horn_send"];
+    }else{
+        self.hornIV.image = s_recvHornIV.image = [UIImage imageNamed:@"horn_recv"];
+    }
+    NSFileManager *manager = [NSFileManager defaultManager];
+    if ([manager fileExistsAtPath:[audioPlayer.url path]]) {
+        dispatch_async(dispatch_get_global_queue(0, 0), ^(){
+            [manager removeItemAtURL:audioPlayer.url error:nil];
+        });
+    }
+}
+
+- (void)audioPlayerDecodeErrorDidOccur:(AVAudioPlayer *)player error:(NSError *)error{
+    DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+    
+}
+
+/* audioPlayerBeginInterruption: is called when the audio session has been interrupted while the player was playing. The player will have been paused. */
+- (void)audioPlayerBeginInterruption:(AVAudioPlayer *)player{
+    DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+
+}
+
+/* audioPlayerEndInterruption:withOptions: is called when the audio session interruption has ended and this player had been interrupted while playing. */
+/* Currently the only flag is AVAudioSessionInterruptionFlags_ShouldResume. */
+- (void)audioPlayerEndInterruption:(AVAudioPlayer *)player withOptions:(NSUInteger)flags{
+    DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+
+}
+
+- (void)audioPlayerEndInterruption:(AVAudioPlayer *)player withFlags:(NSUInteger)flags{
+    DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+
+}
+/* audioPlayerEndInterruption: is called when the preferred method, audioPlayerEndInterruption:withFlags:, is not implemented. */
+- (void)audioPlayerEndInterruption:(AVAudioPlayer *)player{
+    DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+
+}
+
+@end

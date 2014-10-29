@@ -1,0 +1,37 @@
+//
+//  RLRoom.h
+//  manpower
+//
+//  Created by WangShunzhou on 14-9-25.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import <Foundation/Foundation.h>
+#import <CoreData/CoreData.h>
+
+
+@interface RLRoom : NSManagedObject
+
+@property (nonatomic, retain) NSString * roomDescription;
+@property (nonatomic, retain) NSString * roomNaturalLanguageName;
+@property (nonatomic, retain) NSString * roomSubject;
+@property (nonatomic, retain) NSString * roomJid;
+@property (nonatomic, retain) NSNumber * type;
+@property (nonatomic, retain) NSString * photo;
+@property (nonatomic, retain) NSNumber * roomID;
+@property (nonatomic, retain) NSString * owner;
+@property (nonatomic, retain) NSNumber * onlineCount;
+@property (nonatomic, retain) NSString * ownerName;
+@property (nonatomic, retain) NSNumber * sum;
+@property (nonatomic, retain) NSString * roomName;
+
+
++(void)syncRoomsWithArray:(NSArray*)array;
+-(void)createRoom:(NSString*)roomNaturalName withCompletion:(void (^)(BOOL finished))completion;
+-(void)updateToServer;
+//+(void)createRoomWithRoomName:(NSString*)roomName
+//          withRoomNaturalName:(NSString*)roomNaturalName
+//              withRoomSubject:(NSString*)roomSubject
+//          withRoomDescription:(NSString*)roomDescription;
+
+@end

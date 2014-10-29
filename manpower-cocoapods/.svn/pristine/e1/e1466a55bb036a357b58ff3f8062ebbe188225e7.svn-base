@@ -1,0 +1,299 @@
+//
+//  RegisterVC.m
+//  manpower
+//
+//  Created by WangShunzhou on 14-6-4.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import "RLRegisterVC.h"
+#import "XMPPManager.h"
+#import "Service.h"
+#import "RLRegisterLogic.h"
+#import "NSData+Encryption.h"
+
+
+@interface RLRegisterVC (){
+    XMPPManager *xmpp;
+}
+
+@property(nonatomic, assign) IBOutlet UITextField* usernameTF;
+@property(nonatomic, assign) IBOutlet UITextField* captchaTF;
+@property(nonatomic, assign) IBOutlet UIButton* captchaButton;
+@property(nonatomic, assign) IBOutlet UIButton* doneButton;
+
+@property(nonatomic, assign) IBOutlet UIView* captchaErrorView;
+@property(nonatomic, assign) IBOutlet UILabel* captchaErrorLabel;
+
+@property(nonatomic, assign) IBOutlet UIView* phoneNumberErrorView;
+@property(nonatomic, assign) IBOutlet UILabel* phoneNumberErrorLabel;
+@end
+
+static NSUInteger kCaptchaLength = 4;
+static NSUInteger kPhoneNumberLength = 11;
+static NSUInteger kCountDownSeconds = 60;
+
+@implementation RLRegisterVC
+
+- (id)initWithNibName:(NSString *)nibNameOrNil bundle:(NSBundle *)nibBundleOrNil
+{
+    self = [super initWithNibName:nibNameOrNil bundle:nibBundleOrNil];
+    if (self) {
+        // Custom initialization
+        xmpp = [XMPPManager sharedInstance];
+        [xmpp.xmppStream addDelegate:self delegateQueue:dispatch_get_main_queue()];
+        NSString *myJID = [xmpp getFullJID:@""];
+        [xmpp.xmppStream setMyJID:[XMPPJID jidWithString:myJID]];
+        [xmpp connect];
+        _type = 0;
+    }
+    return self;
+}
+
+- (void)viewDidLoad
+{
+    [super viewDidLoad];
+    NSString *title = _type ==1 ? @"忘记密码" : @"注册";
+    [self setTitleText:title];
+
+    self.navigationController.navigationBarHidden = NO;
+    self.navigationItem.hidesBackButton = NO;
+    
+
+    [self.captchaButton setTitleColor:UIColorFromRGB(kEnabledColor) forState:UIControlStateNormal];
+    [self.captchaButton setTitleColor:UIColorFromRGB(kDisabledColor) forState:UIControlStateDisabled];
+    [self.captchaButton setTitleColor:UIColorFromRGB(kDisabledColor) forState:UIControlStateHighlighted];
+    self.captchaButton.layer.borderWidth = 1;
+    self.captchaButton.layer.cornerRadius = 5;
+    
+    self.phoneNumberErrorView.hidden = YES;
+    self.captchaErrorView.hidden = YES;
+
+ 
+//    UIButton * rightBtn = [UIButton buttonWithType:UIButtonTypeCustom];
+//    rightBtn.frame = CGRectMake(0, 0, 54, 28);
+//    [rightBtn setImage:[UIImage imageNamed:@"next_active"] forState:UIControlStateNormal];
+//    [rightBtn setImage:[UIImage imageNamed:@"next_disable"] forState:UIControlStateHighlighted];
+//    [rightBtn addTarget:self action:@selector(nextViewClick:) forControlEvents:UIControlEventTouchUpInside];
+//    UIBarButtonItem * buttonItem=[[UIBarButtonItem alloc]initWithCustomView:rightBtn];
+//    self.navigationItem.rightBarButtonItem=buttonItem;
+    
+    self.usernameTF.clearButtonMode = UITextFieldViewModeWhileEditing;
+    self.usernameTF.keyboardType = UIKeyboardTypeNumberPad;
+//    self.usernameTF.layer.borderColor = UIColorFromRGB(0x999999).CGColor;
+//    self.usernameTF.layer.borderWidth = 1;
+//    
+//    self.captchaTF.layer.borderColor = UIColorFromRGB(0x999999).CGColor;
+//    self.captchaTF.layer.borderWidth = 1;
+    [self makeNaviLeftButtonVisible:YES];
+    
+    @weakify(self);
+    
+    // 验证码输入框验证 4个字符
+    [[self.captchaTF.rac_textSignal filter:^BOOL(NSString *captcha){
+        return ([captcha length] > kCaptchaLength);
+    }] subscribeNext:^(NSString *captcha){
+        @strongify(self);
+        self.captchaTF.text = [captcha substringToIndex:kCaptchaLength];
+    }];
+    
+    // 手机号输入框验证 11位数字
+    __block NSSet *numberSet = [NSSet setWithObjects:@"0",@"1",@"2",@"3",@"4",@"5",@"6",@"7",@"8",@"9", nil];
+    [self.usernameTF.rac_textSignal subscribeNext:^(NSString *newString){
+        @strongify(self);
+        if (newString.length) {
+            NSString *newChar = [newString substringFromIndex:newString.length - 1];
+            if (![numberSet containsObject:newChar] || newString.length > kPhoneNumberLength) {
+                self.usernameTF.text = [newString substringToIndex:newString.length - 1];
+            }
+        }
+    }];
+    
+    static NSInteger number = 0;
+    
+    // 倒计时signal
+    RACSignal *timerSignal = [[[RACSignal interval:1.0f onScheduler:[RACScheduler mainThreadScheduler]] map:^id(NSDate *date){
+        @strongify(self);
+        if (--number < 0) {
+            self.captchaButton.titleLabel.text = @"获取验证码";
+        }else{
+            self.captchaButton.titleLabel.text = [NSString stringWithFormat:@"%d秒后可重新获取", number];
+
+        }
+        return @YES;
+
+    }] takeUntilBlock:^BOOL(id x){
+        return number <= 0;
+    }];
+    
+    // 验证码是否可点击signal
+    RACSignal *captchaButtonEnabledSignal = [RACSignal combineLatest:@[self.usernameTF.rac_textSignal] reduce:^(NSString *newString){
+        return @(newString.length >= kPhoneNumberLength);
+    }];
+    
+    // 获取验证码按钮 倒计时
+    self.captchaButton.rac_command = [[RACCommand alloc] initWithEnabled:captchaButtonEnabledSignal signalBlock:^RACSignal *(id input) {
+        @strongify(self);
+        number = kCountDownSeconds;
+        if (_type == 1) {
+            [RLRegisterLogic getCaptchaForResetPasswordWithPhoneNumber:self.usernameTF.text success:^(id responseObject){
+                self.phoneNumberErrorView.hidden = YES;
+            } failure:^(id responseObject){
+                if ([responseObject isKindOfClass:[NSDictionary class]]) {
+                    number = 0;
+                    self.phoneNumberErrorLabel.text = responseObject[@"message"];
+                    self.phoneNumberErrorView.hidden = NO;
+                }else{
+                    DDLogError(@"%@",responseObject);
+                }
+
+            } withView:nil];
+        }else{
+            [RLRegisterLogic getCaptchaForRegisterWithPhoneNumber:self.usernameTF.text success:^(id responseObject){
+                self.phoneNumberErrorView.hidden = YES;
+            } failure:^(id responseObject){
+                if ([responseObject isKindOfClass:[NSDictionary class]]) {
+                    number = 0;
+                    self.phoneNumberErrorLabel.text = responseObject[@"message"];
+                    self.phoneNumberErrorView.hidden = NO;
+                }else{
+                    DDLogError(@"%@",responseObject);
+                }
+            } withView:nil];
+        }
+        
+        return timerSignal;
+    }];
+
+    [RACObserve(self.captchaButton, enabled) subscribeNext:^(NSNumber *enabled){
+        if ([enabled boolValue]) {
+            self.captchaButton.layer.borderColor = [UIColorFromRGB(kEnabledColor) CGColor];
+        }else{
+            self.captchaButton.layer.borderColor = [UIColorFromRGB(kDisabledColor) CGColor];
+        }
+    }];
+
+    // 完成按钮
+    [[self.doneButton rac_signalForControlEvents:UIControlEventTouchUpInside] subscribeNext:^(UIButton *button){
+        @strongify(self);
+        [RLRegisterLogic confirmCaptcha:self.captchaTF.text withPhoneNumber:self.usernameTF.text success:^(id responseObject){
+            self.captchaErrorView.hidden = YES;
+            
+            RLPassWordVC *passWordVC = [[RLPassWordVC alloc] init];
+            passWordVC.username = self.usernameTF.text;
+            passWordVC.captcha = self.captchaTF.text;
+            passWordVC.type = _type;
+            [self.navigationController pushViewController:passWordVC animated:YES];
+        } failure:^(id responseObject){
+            if ([responseObject isKindOfClass:[NSDictionary class]]) {
+                self.captchaErrorLabel.text = responseObject[@"message"];
+                self.captchaErrorView.hidden = NO;
+            }else{
+                DDLogError(@"%@", responseObject);
+            }
+        } withView:nil];
+    }];
+    
+    RAC(self.doneButton, enabled) = [RACSignal combineLatest:@[self.usernameTF.rac_textSignal,self.captchaTF.rac_textSignal] reduce:^(NSString* phoneNumber, NSString* captcha){
+        return @(phoneNumber.length == kPhoneNumberLength && captcha.length == kCaptchaLength);
+    }];
+
+    self.captchaButton.enabled = NO;
+    self.doneButton.enabled = NO;
+    
+}
+
+- (void)viewWillAppear:(BOOL)animated{
+    [super viewWillAppear:animated];
+    
+}
+
+-(void)viewDidAppear:(BOOL)animated{
+    [super viewDidAppear:animated];
+    [self.usernameTF becomeFirstResponder];
+
+}
+
+- (void)didReceiveMemoryWarning
+{
+    [super didReceiveMemoryWarning];
+    // Dispose of any resources that can be recreated.
+}
+
+
+#pragma mark - IBActions
+- (IBAction)nextViewClick:(id)sender
+{
+//    NSString *phoneNum = self.usernameTF.text ;
+//    if ([phoneNum length] == 0) {
+//        [[IMAlert alloc] alert:@"手机号不能为空" delegate:self];
+//        return;
+//    }
+//    if ([phoneNum length] != 11) {
+//        [[IMAlert alloc] alert:@"手机号不合法" delegate:self];
+//        return;
+//    }
+//    
+//    RLPassWordVC *rlPassWord = [[RLPassWordVC alloc] init];
+//    rlPassWord.username = phoneNum;
+//    [self.navigationController pushViewController:rlPassWord animated:YES];
+}
+- (void)leftBtnClicked:(id)sender
+{
+    [self.usernameTF resignFirstResponder];
+    [self.navigationController popViewControllerAnimated:YES];
+}
+
+-(IBAction)captchaButtonClicked:(id)sender{
+//    UIButton *button  = (UIButton *)sender;
+//    button.enabled = false;
+
+//    [[RACSignal interval:1.0f onScheduler:[RACScheduler mainThreadScheduler]] startWith:[NSDate date]];
+    
+//    NSDictionary *params = @{@"ecModelValidate.model":self.usernameTF.text};
+//    [[Service sharedService] post:@"addEcModelValidate" Parameters:params success:^(AFHTTPRequestOperation* operation, id responseObject){
+//        DDLogInfo(@"%@",responseObject);
+//    } failure:^(AFHTTPRequestOperation* operation, NSError *error){
+//        DDLogError(@"%@",error);
+//    }];
+}
+
+/*
+- (IBAction)regButtonClicked:(id)sender{
+    XMPPManager *xmppManager = [XMPPManager sharedInstance];
+    
+    NSString *username = self.usernameTF.text;
+    NSString *password = self.passwordTF.text;
+    NSString *nickname = self.nicknameTF.text;
+    
+    
+    NSError *err = nil;
+    NSMutableArray *elements = [NSMutableArray array];
+    [elements addObject:[NSXMLElement elementWithName:@"username" stringValue:username]];
+    [elements addObject:[NSXMLElement elementWithName:@"password" stringValue:password]];
+    [elements addObject:[NSXMLElement elementWithName:@"name" stringValue:nickname]];
+
+    [xmppManager.xmppStream registerWithElements:elements error:&err];
+    if (err) {
+        DDLogError(@"%@",err);
+    }
+}*/
+
+
+#pragma mark - XMPPManager
+- (void)xmppStreamDidRegister:(XMPPStream *)sender{
+    [self showStringHUD:@"注册成功\n请点击左上角返回登陆" second:2];
+}
+
+- (void)xmppStream:(XMPPStream *)sender didNotRegister:(NSXMLElement *)error{
+    DDLogError(@"%@",error);
+    [self showStringHUD:@"注册失败\n" second:2];
+}
+
+//#pragma mark - IMAlert
+//- (void)alertView:(UIAlertView *)alertView clickedButtonAtIndex:(NSInteger)buttonIndex
+//{
+//   
+//}
+
+@end

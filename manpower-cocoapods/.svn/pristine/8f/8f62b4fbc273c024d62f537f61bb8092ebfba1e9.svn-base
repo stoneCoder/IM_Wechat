@@ -1,0 +1,131 @@
+//
+//  TextMessageView.m
+//  manpower
+//
+//  Created by WangShunzhou on 14-7-9.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import "TextMessageView.h"
+
+#import "FaceBoard.h"
+
+#define FACE_ICON_NAME      @"^[0][0-8][0-5]$"
+
+
+@implementation TextMessageView
+
+@synthesize data;
+
+- (id)initWithFrame:(CGRect)frame {
+    
+    self = [super initWithFrame:frame];
+    if (self) {
+        self.backgroundColor = [UIColor clearColor];
+    }
+    return self;
+}
+
+- (void)showMessage:(NSArray *)message {
+    
+    self.data = (NSMutableArray *)message;
+    
+    [self setNeedsDisplay];
+}
+
+- (void)drawRect:(CGRect)rect {
+    
+	if ( data ) {
+        NSDictionary *faceMap = [[NSUserDefaults standardUserDefaults] objectForKey:@"FaceMap"];
+        
+        UIFont *font = [UIFont systemFontOfSize:MSG_FONT_SIZE];
+        isLineReturn = NO;
+        
+        upX = VIEW_LEFT;
+        upY = VIEW_TOP;
+        
+		for (int index = 0; index < [data count]; index++) {
+            
+			NSString *str = [data objectAtIndex:index];
+			if ( [str hasPrefix:FACE_NAME_BEGIN] && [str hasSuffix:FACE_NAME_END] ) {
+                
+				//NSString *imageName = [str substringWithRange:NSMakeRange(1, str.length - 2)];
+                
+                NSArray *imageNames = [faceMap allKeysForObject:str];
+                NSString *imageName = nil;
+                
+                if ( imageNames.count > 0 ) {
+                    
+                    imageName = [imageNames objectAtIndex:0];
+                }
+                UIImage *image = [UIImage imageNamed:imageName];
+                if ( image ) {
+                    if ( upX > ( VIEW_WIDTH_MAX - KFacialSizeWidth) ) {
+                        
+                        isLineReturn = YES;
+                        
+                        upX = VIEW_LEFT;
+                        upY += VIEW_LINE_HEIGHT;
+                    }
+                    
+                    [image drawInRect:CGRectMake(upX, upY, KFacialSizeWidth, KFacialSizeHeight)];
+                    upX += KFacialSizeWidth;
+                    lastPlusSize = KFacialSizeWidth;
+                }
+                else {
+                    [self drawText:str withFont:font];
+                }
+			}
+            else {
+                [self drawText:str withFont:font];
+			}
+        }
+	}
+}
+
+- (void)drawText:(NSString *)string withFont:(UIFont *)font{
+    for ( int index = 0; index < string.length; index++) {
+        NSString *character = [string substringWithRange:NSMakeRange( index, 1 )];
+        CGSize size;
+        if([character isEqualToString:[@"😊" substringWithRange:NSMakeRange(0, 1 )]])
+        {
+            character = [string substringWithRange:NSMakeRange(index, 2 )];
+            index++;
+            
+            size = CGSizeMake(22, 22);
+        }
+        else
+        {
+            size = [character sizeWithFont:font constrainedToSize:CGSizeMake(VIEW_WIDTH_MAX, VIEW_LINE_HEIGHT)];
+        }
+        
+        if ( upX > ( VIEW_WIDTH_MAX - size.width) ) {
+            isLineReturn = YES;
+            upX = VIEW_LEFT;
+            upY += VIEW_LINE_HEIGHT;
+        }
+        [character drawInRect:CGRectMake(upX, upY, size.width, self.bounds.size.height) withFont:font];
+        upX += size.width;
+        lastPlusSize = size.width;
+    }
+}
+
+/**
+ * 判断字符串是否有效
+ */
+- (BOOL)isStrValid:(NSString *)srcStr forRule:(NSString *)ruleStr {
+    
+    NSRegularExpression *regularExpression = [[NSRegularExpression alloc] initWithPattern:ruleStr
+                                                                                  options:NSRegularExpressionCaseInsensitive
+                                                                                    error:nil];
+    
+    NSUInteger numberOfMatch = [regularExpression numberOfMatchesInString:srcStr
+                                                                  options:NSMatchingReportProgress
+                                                                    range:NSMakeRange(0, srcStr.length)];
+    
+    return ( numberOfMatch > 0 );
+}
+
+
+
+@end

@@ -1,0 +1,29 @@
+//
+//  Prefix header
+//
+//  The contents of this file are implicitly included at the beginning of every source file.
+//
+
+#import <Availability.h>
+
+#ifndef __IPHONE_3_0
+#warning "This project uses features only available in iOS SDK 3.0 and later."
+#endif
+
+#ifdef __OBJC__
+    #import <UIKit/UIKit.h>
+    #import <Foundation/Foundation.h>
+    #import <CoreData/CoreData.h>
+    #import"Define.h"
+    #define MR_SHORTHAND
+    #import <CoreData+MagicalRecord.h>
+    #import <ReactiveCocoa.h>
+    #import <RACEXTScope.h>
+#endif
+
+#define STATUS_BAR_HEIGHT 20
+#define NAVIGATION_BAR_LENGTH 44
+#define TABBAR_HEIGHT 49
+
+#define HAVE_XMPP_SUBSPEC_RECONNECT
+#define HAVE_XMPP_SUBSPEC_ROSTER

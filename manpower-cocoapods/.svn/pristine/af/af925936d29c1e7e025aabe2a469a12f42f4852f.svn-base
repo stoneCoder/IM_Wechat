@@ -1,0 +1,13 @@
+//
+//  RLGroupVO.m
+//  manpower
+//
+//  Created by hanjin on 14-6-10.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import "RLGroupVO.h"
+
+@implementation RLGroupVO
+
+@end

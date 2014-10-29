@@ -1,0 +1,599 @@
+ //
+//  IMMessage.m
+//  manpower
+//
+//  Created by WangShunzhou on 14-6-17.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import "XMPPCoreDataStorageProtected.h"
+#import "IMMessageStorage.h"
+#import "ZMMessage.h"
+#import "XMPPMessageArchiving_Message_CoreDataObject.h"
+#import "Define.h"
+#import "NSXMLElement+XEP_0203.h"
+#import "XMPPRoomMessage.h"
+#import "IMMessageHelper.h"
+#import "IMMessageRecent.h"
+#import <AudioToolbox/AudioToolbox.h>
+#import "XMPPManager.h"
+#import "RLRoom.h"
+
+#define AssertPrivateQueue() \
+NSAssert(dispatch_get_specific(storageQueueTag), @"Private method: MUST run on storageQueue");
+
+
+@implementation IMMessageStorage
+@synthesize bareJID;
+
+static IMMessageStorage *sharedInstance;
+
++ (instancetype)sharedInstance
+{
+	static dispatch_once_t onceToken;
+	dispatch_once(&onceToken, ^{
+		sharedInstance = [[IMMessageStorage alloc] initWithDatabaseFilename:nil storeOptions:nil];
+	});
+	
+	return sharedInstance;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#pragma mark Setup
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+- (void)commonInit
+{
+	[super commonInit];
+	
+	// This method is invoked by all public init methods of the superclass
+//    autoRemovePreviousDatabaseFile = YES;
+//	autoRecreateDatabaseFile = YES;
+    
+    [self resetMessageStatus];
+    [self fetchedResultsController];
+    [IMMessageHelper createDirectory:TMP_DIR_PATH];
+
+//    id obj = [[self fetchedResultsController] objectAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
+}
+
+-(void)resetMessageStatus{
+    NSEntityDescription *imMessage = [NSEntityDescription entityForName:@"ZMMessage" inManagedObjectContext:self.mainThreadManagedObjectContext];
+    NSPredicate *predicate = [NSPredicate predicateWithFormat:@" status == %d ",MSG_STATUS_PENDING];
+    
+    NSFetchRequest * request = [[NSFetchRequest alloc] init];
+    [request setEntity:imMessage];
+    [request setPredicate:predicate];
+    NSArray *messages = [self.mainThreadManagedObjectContext executeFetchRequest:request error:nil];
+    for (ZMMessage *message in messages) {
+        message.status = MSG_STATUS_FAILURE;
+    }
+    [self.mainThreadManagedObjectContext save:nil];
+
+}
+
+- (void)dealloc
+{
+#if !OS_OBJECT_USE_OBJC
+	if (parentQueue)
+		dispatch_release(parentQueue);
+#endif
+}
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#pragma mark Utilities
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#pragma mark Overrides
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+- (void)didCreateManagedObjectContext
+{
+	// This method is overriden from the XMPPCoreDataStore superclass.
+	// From the documentation:
+	//
+	// Override me, if needed, to provide customized behavior.
+	//
+	// For example, you may want to perform cleanup of any non-persistent data before you start using the database.
+	//
+	// The default implementation does nothing.
+	
+	
+	// Reserved for future use (directory versioning).
+	// Perhaps invoke [self _clearAllResourcesForXMPPStream:nil] ?
+}
+
+- (NSString *)managedObjectModelName
+{	
+	return @"IMMessageManagedObject";
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#pragma mark - Private API
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+/**
+ *  查找最近联系人
+ *
+ *  @param myBareJID     NSString 我的JID
+ *  @param friendBareJID NSString 好友JID
+ *
+ *  @return IMMessageRecent 最近联系人
+ */
+-(IMMessageRecent*)getRecentMessage:(NSString*)myBareJID withFriend:(NSString*)friendBareJID{
+    IMMessageRecent *result = nil;
+    NSString *entityName = @"IMMessageRecent";
+    NSEntityDescription *message = [NSEntityDescription entityForName:entityName inManagedObjectContext:self.mainThreadManagedObjectContext];
+    
+    NSPredicate *predicate = [NSPredicate predicateWithFormat:@"bareJID == %@ AND myBareJID == %@",friendBareJID,myBareJID];
+    NSFetchRequest *request = [[NSFetchRequest alloc] init];
+    [request setPredicate:predicate];
+    [request setEntity:message];
+    
+    NSError *err;
+    NSArray *results = [self.mainThreadManagedObjectContext executeFetchRequest:request error:&err];
+    if (err) {
+        DDLogError(@"%@",err);
+    }
+    if ([results count]) {
+        result = [results objectAtIndex:0];
+    }else{
+        result = [NSEntityDescription insertNewObjectForEntityForName:entityName inManagedObjectContext:self.mainThreadManagedObjectContext];
+        result.bareJID = friendBareJID;
+        result.myBareJID = myBareJID;
+        result.unreadMsgNum = 0;
+    }
+    
+    return result;
+}
+
+/**
+ *  根据ID来查找Message，没有则返回nil
+ *
+ *  @param uuid NSString
+ *
+ *  @return IMMessage
+ */
+-(ZMMessage*)getMessageWithUUID:(NSString*)uuid{
+    ZMMessage *result = nil;
+    NSString *entityName = @"ZMMessage";
+    NSEntityDescription *message = [NSEntityDescription entityForName:entityName inManagedObjectContext:self.managedObjectContext];
+    
+    NSPredicate *predicate = [NSPredicate predicateWithFormat:@"uuid == %@ AND myBareJID == %@",uuid,[[XMPPManager sharedInstance].xmppStream.myJID bare]];
+    NSFetchRequest *request = [[NSFetchRequest alloc] init];
+    [request setPredicate:predicate];
+    [request setEntity:message];
+    
+    NSError *err;
+    NSArray *results = [self.managedObjectContext executeFetchRequest:request error:&err];
+    if (err) {
+        DDLogError(@"%@",err);
+    }
+    if ([results count]) {
+        result = [results objectAtIndex:0];
+    }else{
+        result = nil;
+    }
+    
+    return result;
+
+}
+
+
+/**
+ *  删除最近联系人
+ *
+ *  @param aBareJID NSString 好友JID，不带resource
+ *
+ *  @return BOOL
+ */
+-(BOOL)removeRecentMessageWithBareJID:(NSString*)aBareJID{
+    XMPPStream *xmppStream = [XMPPManager sharedInstance].xmppStream;
+    NSManagedObjectContext *moc = self.mainThreadManagedObjectContext;
+    
+    NSEntityDescription *entity = [NSEntityDescription entityForName:@"IMMessageRecent"
+                                              inManagedObjectContext:moc];
+    
+    NSPredicate *predidate = [NSPredicate predicateWithFormat:@" myBareJID == %@ AND bareJID == %@",xmppStream.myJID.bare,aBareJID];
+    
+    NSFetchRequest *fetchRequest = [[NSFetchRequest alloc] init];
+    [fetchRequest setEntity:entity];
+    [fetchRequest setPredicate:predidate];
+    
+    NSError *err = nil;
+    NSArray *retArr = [moc executeFetchRequest:fetchRequest error:&err];
+    if (err) {
+        DDLogError(@"ERROR:%@",err);
+        return NO;
+    }
+    if ([retArr count]) {
+        IMMessageRecent *recent = [retArr objectAtIndex:0];
+        [moc deleteObject:recent];
+        [moc save:nil];
+    }
+    return YES;
+}
+
+/**
+ *  删除好友的本地消息记录
+ *
+ *  @param aBareJID NSString 好友的JID, 不加resource
+ *
+ *  @return BOOL
+ */
+-(BOOL)removeMessageWithBareJID:(NSString*)aBareJID{
+    XMPPStream *xmppStream = [XMPPManager sharedInstance].xmppStream;
+    NSManagedObjectContext *moc = self.mainThreadManagedObjectContext;
+    
+    NSEntityDescription *entity = [NSEntityDescription entityForName:@"ZMMessage"
+                                              inManagedObjectContext:moc];
+    
+    NSPredicate *predidate = [NSPredicate predicateWithFormat:@" myBareJID == %@ AND friendBareJID == %@",xmppStream.myJID.bare,aBareJID];
+    
+    NSFetchRequest *fetchRequest = [[NSFetchRequest alloc] init];
+    [fetchRequest setEntity:entity];
+    [fetchRequest setPredicate:predidate];
+    
+    NSError *err = nil;
+    NSArray *retArr = [moc executeFetchRequest:fetchRequest error:&err];
+    if (err) {
+        DDLogError(@"ERROR:%@",err);
+        return NO;
+    }
+    if ([retArr count]) {
+        for (ZMMessage *message in retArr) {
+            [moc deleteObject:message];
+        }
+        [moc save:nil];
+    }
+    return YES;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#pragma mark - Public API
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+/**
+ *  根据archiving_message来插入消息。该方法已废弃。
+ *
+ *  @param message XMPPMessageArchiving_Message_CoreDataObject
+ *
+ *  @return IMMessage
+ */
+-(ZMMessage*)insertIMMessage:(XMPPMessageArchiving_Message_CoreDataObject*)message{
+    ZMMessage *imMessage = [NSEntityDescription insertNewObjectForEntityForName:@"ZMMessage" inManagedObjectContext:self.managedObjectContext];
+    imMessage.type = @"chat";
+    
+    NSDictionary *bodyDic = [NSJSONSerialization JSONObjectWithData:[message.body dataUsingEncoding:NSUTF8StringEncoding] options:NSJSONReadingAllowFragments error:nil];
+    if (bodyDic == nil) {
+        // 兼容纯文本信息
+        imMessage.msg = message.body;
+        imMessage.msgType = MSG_TYPE_TEXT;
+    }else{
+        // 处理Body信息
+        NSString *sendTimeStr = [bodyDic objectForKey:MSG_ARG_TIME];    // 发送时间
+        if (sendTimeStr.length) {
+            NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+            [formatter setDateFormat:MSG_SEND_TIME_FORMATTER];
+            imMessage.sendTime = [formatter dateFromString:sendTimeStr];
+        }
+        imMessage.msg = [bodyDic objectForKey:MSG_ARG_BODY];    // 消息内容
+        imMessage.msgType = [[bodyDic objectForKey: MSG_ARG_TYPE] integerValue];    // 消息体类型（文本/音频/图片）
+        imMessage.outgoing = message.outgoing.boolValue;        // 消息发送方向（接收/发送）
+        imMessage.unread = imMessage.outgoing ? YES : NO;     //发送的消息默认为已读，接收消息默认为未读。
+        NSString* desc = [bodyDic objectForKey:MSG_ARG_DESC];   // description是一个预留字段。目前主要发送音频的时长。
+        if (desc.length) {
+            imMessage.desc = desc;
+        }
+    }
+
+    return imMessage;
+}
+
+-(ZMMessage*)insertIMMessage{
+    DDLogVerbose(@"%@",self.mainThreadManagedObjectContext);
+    ZMMessage *imMessage = [NSEntityDescription insertNewObjectForEntityForName:@"ZMMessage" inManagedObjectContext:self.mainThreadManagedObjectContext];
+    return imMessage;
+}
+
+-(ZMMessage*)insertChatIMMessage{
+    ZMMessage *imMessage = [self insertIMMessage];
+    imMessage.type = @"chat";
+    return imMessage;
+}
+
+-(ZMMessage*)insertGroupchatIMMessage{
+    ZMMessage *imMessage = [self insertIMMessage];
+    imMessage.type = @"groupchat";
+    return imMessage;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#pragma mark - IMMessage NSFetchedResultsController
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+/**
+ *  获得IMMessage的fetchedResultsController，用于监听消息。
+ *
+ *  @return NSFetchedResultsController
+ */
+-(NSFetchedResultsController*)fetchedResultsController{
+    if (fetchedResultsController == nil)
+	{
+		NSManagedObjectContext *moc = [self mainThreadManagedObjectContext];
+		
+		NSEntityDescription *entity = [NSEntityDescription entityForName:@"ZMMessage"
+		                                          inManagedObjectContext:moc];
+        
+        NSSortDescriptor *sd1 = [[NSSortDescriptor alloc] initWithKey:@"timestamp" ascending:NO];
+		
+		NSArray *sortDescriptors = [NSArray arrayWithObjects:sd1, nil];
+		
+//        NSPredicate *predidate = [NSPredicate predicateWithFormat:@"msg like %%"];
+        
+		NSFetchRequest *fetchRequest = [[NSFetchRequest alloc] init];
+		[fetchRequest setEntity:entity];
+		[fetchRequest setSortDescriptors:sortDescriptors];
+//        [fetchRequest setPredicate:predidate];
+//		[fetchRequest setFetchBatchSize:500];
+		
+//        NSArray *results = [moc executeFetchRequest:fetchRequest error:nil];
+//        NSLog(@"%@",results);
+		fetchedResultsController = [[NSFetchedResultsController alloc] initWithFetchRequest:fetchRequest
+                                                                              managedObjectContext:moc
+                                                                                sectionNameKeyPath:nil
+                                                                                         cacheName:nil];
+		[fetchedResultsController setDelegate:self];
+		
+		
+		NSError *error = nil;
+		if (![fetchedResultsController performFetch:&error])
+		{
+			DDLogError(@"Error performing fetch: %@", error);
+		}
+        
+	}
+    
+    return fetchedResultsController;
+}
+
+#pragma mark - FetchedResultsController Delegate
+/**
+ *  监听IMMessage，如果IMMessage有变化，更新“最新消息”列表(IMMessageRecent)
+ *
+ *  @param controller   NSFetchedResultsController
+ *  @param anObject     id
+ *  @param indexPath    NSIndexPath
+ *  @param type         NSFetchedResultsChangeType
+ *  @param newIndexPath newIndexPath
+ */
+-(void)controller:(NSFetchedResultsController *)controller didChangeObject:(id)anObject atIndexPath:(NSIndexPath *)indexPath forChangeType:(NSFetchedResultsChangeType)type newIndexPath:(NSIndexPath *)newIndexPath{
+    ZMMessage *message = anObject;
+    IMMessageRecent *recent = nil;
+    
+    switch (type) {
+        case NSFetchedResultsChangeInsert:
+  
+//            break;
+//        case NSFetchedResultsChangeUpdate:
+            recent = [self getRecentMessage:message.myBareJID withFriend:message.friendBareJID];
+            break;
+        default:
+            break;
+    }
+    
+    switch (message.msgType) {
+        case MSG_TYPE_TEXT:
+            recent.msg = message.msg;
+            break;
+        case MSG_TYPE_AUDIO:
+            recent.msg = @"[语音消息]";
+            break;
+        case MSG_TYPE_IMAGE:
+            recent.msg = @"[图片]";
+            break;
+    }
+    
+    recent.msgType = message.msgType;
+    if (!message.outgoing && ![bareJID isEqualToString:message.friendBareJID]) {
+        recent.unreadMsgNum++;
+    }
+    XMPPJID *jid = [XMPPJID jidWithString:recent.bareJID];
+
+    if (![message isGroupChat]) {   // 单人聊天
+        XMPPRosterCoreDataStorage *rosterStorage = [XMPPManager sharedInstance].xmppRosterStorage;
+        XMPPStream *stream = [XMPPManager sharedInstance].xmppStream;
+        XMPPUserCoreDataStorageObject* user = [rosterStorage userForJID:jid xmppStream:stream managedObjectContext:rosterStorage.mainThreadManagedObjectContext];
+        if (user) {
+            recent.nickname = user.nickname.length ? user.nickname : [[user.displayName componentsSeparatedByString:@"@"] objectAtIndex:0];
+        }else{
+            recent.nickname = [[recent.bareJID componentsSeparatedByString:@"@"] objectAtIndex:0];
+        }
+    }else{    //群聊天
+        NSString *roomName = jid.user;
+        RLRoom *room = [RLRoom MR_findFirstByAttribute:@"roomName" withValue:roomName];
+        recent.nickname = room.roomNaturalLanguageName;
+    }
+    
+    recent.timestamp = message.timestamp;
+    recent.type = message.type;
+    
+    [recent save];
+}
+
+#pragma mark - Storage
+- (void)archiveMessage:(XMPPMessage *)message outgoing:(BOOL)isOutgoing xmppStream:(XMPPStream *)xmppStream
+{
+	NSString *messageBody = [[message elementForName:@"body"] stringValue];
+	if ([messageBody length] == 0){
+        return; //不处理body为空的信息
+    }
+    
+    NSDictionary *bodyDic = [NSJSONSerialization JSONObjectWithData:[messageBody dataUsingEncoding:NSUTF8StringEncoding] options:NSJSONReadingMutableContainers error:nil];
+    
+	[self scheduleBlock:^{
+        // 消息中必须有ID。不接收没有ID的消息。
+        NSString* uuid = [[message attributeForName:@"id"] stringValue];
+        if (uuid.length == 0) {
+            return ;
+        }
+        
+        
+        
+		NSManagedObjectContext *moc = [self managedObjectContext];
+		
+		XMPPJID *toJID = [message to];
+        XMPPJID *fromJID =  [message from];
+
+        
+        NSArray *parts;
+        if ([[message type] isEqualToString:@"groupchat"]) {
+            /* 
+             1.群消息service id格式为service@domain/nickname/JID
+               由于群内只能获取到成员的nickname，最后带上JID方便接收方获取个人信息
+             
+             2.查找并加入群(注)，需要三个字段firstname, lastname, nickname.
+               JID: username@domain
+               firstname: username
+               lastname:  username@domain
+               nickname:  username/username@domain
+             
+             注:此处加入群为第一次加入到一个群，对应协议为
+             <iq from='hag66@shakespeare.lit/pda'
+             id='nv71va54'
+             to='coven@chat.shakespeare.lit'
+             type='set'>
+             <query xmlns='jabber:iq:register'>
+             ....
+             </iq>
+             
+             
+             并非进入自己已有的群，对应协议
+             <presence to='coven@chat.shakespeare.lit/thirdwitch'>
+             <x xmlns='http://jabber.org/protocol/muc'/>
+             </presence>
+            */
+            NSString *fullJID = [fromJID full];
+            parts = [fullJID componentsSeparatedByString:@"/"];
+            // 如果id不是三部分组成，则有可能是系统发的文字消息，不处理。
+            if ([parts count] < 3) {
+                return ;
+            }
+            // 第三部分为对发送方JID，如果是自己的JID，不处理
+            if ([[parts objectAtIndex:2] isEqualToString:[xmppStream.myJID bare]]) {
+                return;
+            }
+        }
+        
+        // 要点：
+        // 1. 自己发送的群消息会被openfire广播回来。
+        // 2. 发群消息由于权限问题失败时，消息会原样返回，type="error"。
+        // 所以收到消息时先查找数据库，看该消息是否已经存在，如果存在，且返回的消息type不为error，证明该消息已经本地储存过，过滤掉。
+        // 3. 经过加插件，发送消息后，会产生消息回执。样式为:
+        // <message xmlns="jabber:client" type="chat" to="18627891215@hanmin"
+        // id="395F4949-34EC-416D-B181-CABD47CF3C3E" from="admin@domain">
+        //      <body>OK</body>
+        // </message>
+        
+        NSDateFormatter *dateFormatter = [[NSDateFormatter alloc] init];
+        [dateFormatter setDateFormat:MSG_SEND_TIME_FORMATTER];
+        
+        ZMMessage* imMessage;
+        imMessage = [self getMessageWithUUID:uuid]; 
+        if (imMessage) {
+            if([message isErrorMessage]){
+                imMessage.type = @"error";
+                imMessage.status = MSG_STATUS_FAILURE;
+                [imMessage save];
+                return;
+            }else{
+                #if MSG_SENT_RECIEPT
+                NSData *data = [[message body] dataUsingEncoding:NSUTF8StringEncoding];
+                NSDictionary *bodyDic = [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingAllowFragments error:nil];
+                if ([[[message from] user] isEqualToString:@"admin"] && ([[message body] isEqualToString:MSG_SENT_SUCCESS] || [[bodyDic objectForKey:@"msg"] isEqualToString:@"OK"])) {
+                    imMessage.sendTime = [dateFormatter dateFromString:[bodyDic objectForKey:MSG_ARG_TIME]];
+                    [imMessage afterMessageSent];
+                }
+                #endif
+            }
+            return;
+        }
+        
+        // 消息不存在，本地存储新消息。
+        imMessage = [NSEntityDescription insertNewObjectForEntityForName:@"ZMMessage" inManagedObjectContext:moc];
+        
+        
+        // 兼容纯文本信息。例如Spark客户端发过来的文本信息。
+        if (bodyDic) {
+            imMessage.msg = [bodyDic objectForKey:MSG_ARG_BODY];
+            imMessage.msgType = [[bodyDic objectForKey:MSG_ARG_TYPE] intValue];
+            imMessage.sendTime = [dateFormatter dateFromString:[bodyDic objectForKey:MSG_ARG_TIME]];
+            imMessage.desc = [bodyDic objectForKey:MSG_ARG_DESC];
+            imMessage.desc = [imMessage.desc isEqualToString:@"0" ] ? @"1" : imMessage.desc;
+            imMessage.avatar = [bodyDic objectForKey:MSG_ARG_AVATAR];
+        }else{
+            imMessage.msg = message.body;
+            imMessage.msgType = MSG_TYPE_TEXT;
+        }
+        
+        imMessage.myBareJID = [toJID bare];
+        imMessage.outgoing = isOutgoing;
+        imMessage.status = MSG_STATUS_PENDING;
+        imMessage.type = [message type];
+        if ([imMessage.type isEqualToString: @"chat"]) {
+            imMessage.toJID = [toJID full];
+            imMessage.toBareJID = [toJID bare];
+            imMessage.fromJID = [fromJID full];
+            imMessage.fromBareJID = [fromJID bare];
+        }else if([imMessage.type isEqualToString: @"groupchat"]){
+            NSString *roomJID = parts[0];
+            NSString *nickname = parts[1];
+            NSString *friendJID = parts[2];
+            imMessage.roomJID = roomJID;
+            imMessage.nickname = nickname;
+            imMessage.fromBareJID = friendJID;
+            
+            imMessage.toJID = [toJID full];
+//            imMessage.toBareJID = [toJID bare];
+            imMessage.fromJID = [fromJID full];
+//            imMessage.fromBareJID = [fromJID bare];
+            
+        }else if([imMessage.type isEqualToString: @"error"]){
+            imMessage.type = @"error";
+            imMessage.status = MSG_STATUS_FAILURE;
+        }
+        imMessage.unread = YES;
+        imMessage.friendBareJID = [fromJID bare];
+        imMessage.uuid = [[message attributeForName:@"id"] stringValue];
+        
+//        NSDate *timestamp = [message delayedDeliveryDate];
+        imMessage.remoteTimestamp = [message delayedDeliveryDate];
+        
+        imMessage.timestamp = [NSDate date];
+
+
+        [imMessage save];
+        if (ENABLE_VIBRATE) {
+            AudioServicesPlaySystemSound(kSystemSoundID_Vibrate);
+        }
+    }];
+}
+
+#pragma mark - XMPPMessage
+- (void)xmppStream:(XMPPStream *)sender didReceiveMessage:(XMPPMessage *)message{
+    DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+    if ([message.type isEqualToString:@"groupchat"]) {
+        DDLogVerbose(@"=====================================\n%@", message);
+    }
+    
+    [self archiveMessage:message outgoing:NO xmppStream:sender];
+}
+
+- (void)xmppStream:(XMPPStream *)sender didSendMessage:(XMPPMessage *)message{
+    DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+//    [self archiveMessage:message outgoing:YES xmppStream:sender];
+}
+@end
+

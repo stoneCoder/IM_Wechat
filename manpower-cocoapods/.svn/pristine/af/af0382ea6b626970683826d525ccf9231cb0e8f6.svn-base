@@ -1,0 +1,34 @@
+//
+//  IMMessageBaseCell.h
+//  manpower
+//
+//  Created by WangShunzhou on 14-6-19.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import <UIKit/UIKit.h>
+#import "IMMessageHelper.h"
+#import "ZMMessage.h"
+#import "XMPPManager.h"
+@class RLSendMessageVC;
+
+@interface IMMessageBaseCell : UITableViewCell
+
+@property(nonatomic, strong) UIImageView *photoView;    // 头像
+@property(nonatomic, strong) UIImageView *containerView;    // 消息主体外围的Wrapper
+@property(nonatomic, strong) UIButton *resendButton;    // 重发按钮
+@property(nonatomic, strong) UILabel *nameLabel;        // 群消息昵称
+@property(nonatomic, strong) UIView *timeView;        // 时间背景
+@property(nonatomic, strong) UILabel *timeLabel;        // 显示时间
+
+@property(nonatomic, strong) UITableView *tableView;
+@property(nonatomic, strong) UIActivityIndicatorView *activityIndicator;  // 指示消息状态为发送中或接收中，IMMessage状态为pendding时显示。
+@property(nonatomic, strong) ZMMessage *imMessage;  // 消息的Model
+@property(nonatomic, assign) BOOL shouldShowTimeLabel;  // 是否显示时间标签
+@property(nonatomic, weak) RLSendMessageVC *sendMessageVC;  // 发送消息的VC
+@property(nonatomic, assign) BOOL shouldUpdateWhileAttrChanged;     // 默认值为YES。当IMMessage属性发生改变时刷新当前Cell
+
+
+-(void)preConfigureCell:(ZMMessage*)message;
+-(void)configureCell:(ZMMessage*)message;
+@end

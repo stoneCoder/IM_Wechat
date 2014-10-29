@@ -1,0 +1,65 @@
+//
+//  RLRoomLogic.m
+//  manpower
+//
+//  Created by WangShunzhou on 14-9-24.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import "RLRoomLogic.h"
+
+@implementation RLRoomLogic
+
+
++(void)createRoom:(NSString*)roomName
+      withUserJID:(NSString*)userJIDStr
+  withDescription:(NSString*)description
+      withSubject:(NSString*)subject
+         withView:(UIView*)view
+          success:(void(^)(id responseObject))success
+          failure:(void(^)(id responseObject))failure{
+    
+    NSString *type = @"createRoom";
+    
+    [RLRoomLogic operateRoom:roomName withUserJID:userJIDStr withType:type withDescription:description withSubject:subject withView:view success:success failure:failure];
+}
+
++(void)updateRoom:(NSString*)roomName
+      withUserJID:(NSString*)userJIDStr
+  withDescription:(NSString*)description
+      withSubject:(NSString*)subject
+         withView:(UIView*)view
+          success:(void(^)(id responseObject))success
+          failure:(void(^)(id responseObject))failure{
+    
+    NSString *type = @"updateRoom";
+
+    [RLRoomLogic operateRoom:roomName withUserJID:userJIDStr withType:type withDescription:description withSubject:subject withView:view success:success failure:failure];
+    
+}
+
++(void)operateRoom:(NSString*)roomName
+      withUserJID:(NSString*)userJIDStr
+         withType:(NSString*)type
+  withDescription:(NSString*)description
+      withSubject:(NSString*)subject
+         withView:(UIView*)view
+          success:(void(^)(id responseObject))success
+          failure:(void(^)(id responseObject))failure{
+    
+    NSDictionary *params = @{@"type" : type,
+                             @"subdomain" : @"conference",
+                             @"userJID" : userJIDStr,
+                             @"roomName" : roomName,
+                             @"description" : description,
+                             @"subject" : subject,
+                             @"naturalName" : roomName};
+    
+    NSString *uri = @"plugins/ofroomplugin/ofroomplugin";
+    NSString *urlStr = [NSString stringWithFormat:@"%@%@",API,uri];
+    
+    [RLBaseLogic post:urlStr Parameters:params success:success failure:failure withView:view];
+    
+}
+
+@end

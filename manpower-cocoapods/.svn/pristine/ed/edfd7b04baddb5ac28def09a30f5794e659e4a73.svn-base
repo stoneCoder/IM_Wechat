@@ -1,0 +1,127 @@
+//
+//  RLRoomLogic.h
+//  manpower
+//
+//  Created by WangShunzhou on 14-9-24.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import "RLBaseLogic.h"
+
+@interface RLRoomLogic : RLBaseLogic
+/**
+ *  创建群
+ *
+ *  @param roomName   群名称
+ *  @param userJIDStr 当前用户（群主）的JID
+ *  @param description 群公告
+ *  @param subject    群标签
+ *  @param view       当前view，出现错误会显示在当前view上
+ *  @param success
+ *  @param failure
+ 
+ 
+ http://192.168.102.164:9090/plugins/ofroomplugin/ofroomplugin?subdomain=conference&type=createRoom&userJID=liufuhai0104@hanmin&naturalName=baidu
+ */
++(void)createRoom:(NSString*)roomName
+      withUserJID:(NSString*)userJIDStr
+  withDescription:(NSString*)description
+      withSubject:(NSString*)subject
+  withNaturalName:(NSString*)naturalName
+         withView:(UIView*)view
+          success:(void(^)(id responseObject))success
+          failure:(void(^)(id responseObject))failure;
+
+
+/**
+ *  更新群资料
+ *
+ *  @param roomName    <#roomName description#>
+ *  @param userJIDStr  <#userJIDStr description#>
+ *  @param description <#description description#>
+ *  @param subject     <#subject description#>
+ *  @param naturalName <#naturalName description#>
+ *  @param view        <#view description#>
+ *  @param success     <#success description#>
+ *  @param failure     <#failure description#>
+ */
++(void)updateRoom:(NSString*)roomName
+      withUserJID:(NSString*)userJIDStr
+  withDescription:(NSString*)description
+      withSubject:(NSString*)subject
+  withNaturalName:(NSString*)naturalName
+         withView:(UIView*)view
+          success:(void(^)(id responseObject))success
+          failure:(void(^)(id responseObject))failure;
+
+
+/**
+ *  更新群头像
+ *
+ *  @param filePath 图片文件路径
+ *  @param roomID   roomID,表中自增ID，非roomName
+ *  @param view
+ *  @param success
+ *  @param failure
+ */
++(void)updatePhoto:(NSString*)filePath
+        withRoomID:(NSString*)roomID
+          withView:(UIView*)view
+           success:(void(^)(id responseObject))success
+           failure:(void(^)(id responseObject))failure; //Deprecated
+
+/**
+ *  更新群头像
+ *
+ *  @param filePath 图片文件路径
+ *  @param roomID   roomName
+ *  @param view
+ *  @param success
+ *  @param failure
+ */
++(void)updatePhoto:(NSString*)filePath
+        withRoomName:(NSString*)roomName
+          withView:(UIView*)view
+           success:(void(^)(id responseObject))success
+           failure:(void(^)(id responseObject))failure;
+
+/**
+ *  查询群详情
+ *
+ *  @param roomName        Room JID的user部分
+ *  @param userJID         当前用户JID
+ *  @param success
+ *  @param failure
+ *  @param connectionError
+ *
+ *  http://192.168.102.143:9090/plugins/ofroomplugin/ofroomplugin?subdomain=conference&type=getRoomInfo&roomName=2222
+ *
+ */
++(void)getRoomInfo:(NSString *)roomName withUserJIDStr:(NSString *)userJID success:(void (^)(id json))success failure:(void (^)( id json))failure connectionError:(void(^)(NSError *error))connectionError;
+
+
+/**
+ *  更新用户在群中的昵称
+ *
+ *  @param nickname   昵称
+ *  @param userJIDStr 用户JID
+ *  @param roomID     群ID，自增ID，非roomName
+ */
++(void)changeNickname:(NSString*)nickname withUserJIDStr:(NSString*)userJIDStr withRoomName:(NSString*)roomName;
+
+
+/**
+ *  查询群，以列表形式返回
+ *
+ *  @param keyword         关键字
+ *  @param userJIDStr      当前用户的JID
+ *  @param success
+ *  @param failure
+ *  @param connectionError
+ *
+ *  http://192.168.102.119:9090/plugins/ofroomplugin/ofroomplugin?subdomain=conference&type=getRoomInfosByLike&roomName=10001111&userJID=hanmin@192.168.102.119
+ */
++(void)getRoomsWithKeyword:(NSString*)keyword withUserJIDStr:(NSString*)userJIDStr success:(void (^)(id json))success failure:(void (^)( id json))failure connectionError:(void(^)(NSError *error))connectionError;
+
+
+@end

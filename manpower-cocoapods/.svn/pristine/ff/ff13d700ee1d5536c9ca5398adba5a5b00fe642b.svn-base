@@ -1,0 +1,660 @@
+//
+//  RLSendMessage.m
+//  manpower
+//
+//  Created by WangShunzhou on 14-6-9.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import "RLSendMessageVC.h"
+#import "XMPPManager.h"
+#import "SendBox.h"
+#import "XMPPMessageArchivingCoreDataStorage.h"
+#import "IMMessageHelper.h"
+#import "UIImageView+AFNetworking.h"
+#import "AFNetworking.h"
+#import "UIView+UIViewExt.h"
+#import "IMMessageStorage.h"
+#import "ZMMessage.h"
+#import "RLFriendInfoVC.h"
+#import "IMMessageCell.h"
+#import "RLSendMessageVC.h"
+#import "RLGroupSetInfoVC.h"
+#import "IMRecorderMicView.h"
+#import "FaceBoard.h"
+#import "RLFriend.h"
+#import "RLRoom.h"
+
+@interface RLSendMessageVC ()<SendBoxDelegate,NSFetchedResultsControllerDelegate,FaceBoardDelegate>{
+    UIImage *friendPhoto;   //好友头像
+    UIImage *myPhoto;   //自己头像
+    
+    NSMutableDictionary *cachedImageDic;    // 图片缓存
+    
+    IMMessageStorage *imMessageStorage;     // 消息存储对象
+    
+    NSFetchedResultsController *messageFetchedResultsController;
+    
+    int isOwner; //0 拥有者  1 管理员 2 成员 3 不是成员
+
+    CGFloat visibleHeight;  //tableView可见高度
+    
+    CGSize keyboardSize;
+    
+    NSInteger lastIndex;
+    
+    RLFriend *friend;
+    
+    RLRoom *room;
+}
+
+@end
+
+@implementation RLSendMessageVC
+@synthesize cachedImageDic;
+
+static NSString *textCellIdentifier = @"textCell";
+static NSString *imageCellIdentifier = @"imageCell";
+static NSString *audioCellIdentifier = @"audioCell";
+static NSString *locationCellIdentifier = @"locationCell";
+
+
+#pragma mark - Lifecycle
+- (id)initWithNibName:(NSString *)nibNameOrNil bundle:(NSBundle *)nibBundleOrNil
+{
+    self = [super initWithNibName:nibNameOrNil bundle:nibBundleOrNil];
+    if (self) {
+        xmpp = [XMPPManager sharedInstance];
+        [xmpp.xmppStream addDelegate:self delegateQueue:dispatch_get_main_queue()];
+        imMessageStorage = xmpp.imMessageStorage;
+
+        self.hidesBottomBarWhenPushed = YES;
+        cachedImageDic = [NSMutableDictionary dictionary];
+        lastIndex = 0;
+    }
+    return self;
+}
+
+- (void)viewDidLoad
+{
+    [super viewDidLoad];
+    if (_badgeNum >= 0) {
+//        double delayInSeconds = 0;
+//		dispatch_time_t dispatchTime = dispatch_time(DISPATCH_TIME_NOW, delayInSeconds * NSEC_PER_SEC);
+//        dispatch_after(dispatchTime, dispatch_get_main_queue(), ^{
+            [self setReturnBtnTitle:@"消息" BadgeNumber:(int)_badgeNum];
+//        });
+    }else{
+        [self setReturnBtnTitle:@"返回" BadgeNumber:0];
+    }
+
+    imMessageStorage.bareJID = [self.friendJID bare];
+    
+    self.MyJID = xmpp.xmppStream.myJID;
+    
+    NSData *friendPhotoData = [xmpp.xmppvCardAvatarModule photoDataForJID:_friendJID];
+    NSData *myPhotoData = [xmpp.xmppvCardAvatarModule photoDataForJID:_MyJID];
+    friendPhoto = friendPhotoData ? [UIImage imageWithData:friendPhotoData] : [UIImage imageNamed:@"defaultPerson"];
+    myPhoto = myPhotoData ? [UIImage imageWithData:myPhotoData] : [UIImage imageNamed:@"defaultPerson"];
+    
+    
+    [self setupTableView];
+    [self setupSendBox];
+    [self setRightBarButtonItem];
+
+    [self refreshData];
+    [self.tableView scrollToBottom];
+
+    if ([self.type isEqualToString:@"groupchat"]) {
+        self.xmppRoomManager = [[XMPPRoomManager alloc] init];
+        [self.xmppRoomManager joinRoomWithJid:_friendJID andType:0];
+    }
+    
+}
+
+- (void)viewWillAppear:(BOOL)animated{
+    [super viewWillAppear:animated];
+    [self setupKeyboardNotification];
+    
+//    XMPPUserCoreDataStorageObject *user = [xmpp.xmppRosterStorage userForJID:self.friendJID
+//                                                                    xmppStream:xmpp.xmppStream
+//                                                          managedObjectContext:[xmpp managedObjectContext_roster]];
+//    NSString *nickname = user.nickname.length ?user.nickname : _friendJID.user;
+    
+    NSString *nickname;
+    if ([self.type isEqualToString:@"chat"]) {// 好友聊天
+        friend = [RLFriend MR_findFirstByAttribute:@"username" withValue:self.friendJID.user];
+        if (friend.remark.length) {
+            nickname = friend.remark;
+        }else if (friend.name.length){
+            nickname = friend.name;
+        }else {
+            nickname = _friendJID.user;
+        }
+    }else{  // 群聊天
+        room = [RLRoom MR_findFirstByAttribute:@"roomName" withValue:self.friendJID.user];
+        if (room.roomNaturalLanguageName.length) {
+            nickname = room.roomNaturalLanguageName;
+        }else {
+            nickname = _friendJID.user;
+        }
+    }
+
+    [self setTitleText:nickname];
+
+//    xmpp.tag = self;
+}
+
+
+-(void)viewWillDisappear:(BOOL)animated{
+    [super viewWillDisappear:animated];
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
+-(void)dealloc{
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+- (void)didReceiveMemoryWarning
+{
+    [super didReceiveMemoryWarning];
+    // Dispose of any resources that can be recreated.
+}
+
+#pragma mark - Private - Setup views
+-(void)infoBtnClick:(UIButton *)sender
+{
+    if ([self.type isEqualToString:@"chat"]) {
+        RLFriendInfoVC *rlFriendInfoVC = [[RLFriendInfoVC alloc] init];
+        rlFriendInfoVC.friendJID = self.friendJID;
+        rlFriendInfoVC.backFlag = -1;
+        [self.navigationController pushViewController:rlFriendInfoVC animated:YES];
+    }else
+    {
+        RLGroupSetInfoVC * infoVC=[[RLGroupSetInfoVC alloc]initWithNibName:nil bundle:nil];
+        infoVC.xmppRoom = self.xmppRoomManager.xmppRoom;
+        infoVC.isOwner= self.xmppRoomManager.isOwner;
+        infoVC.roomJID= self.xmppRoomManager.xmppRoom.roomJID;
+        infoVC.roomSubject= self.xmppRoomManager.xmppRoom.roomSubject;
+        infoVC.createFlag = 2;
+        [self.navigationController pushViewController:infoVC animated:YES];
+    }
+    
+}
+
+/**
+ *  隐藏键盘
+ *
+ *  @param sender id
+ */
+-(void)sayByebyeToKeyboard:(id)sender{
+    DDLogVerbose(@"Keyboad, bye-bye!");
+    [self moveSendBoxToBottom:YES];
+}
+
+/**
+ *  设置消息显示的TableView
+ */
+-(void)setupTableView{
+    self.tableView.frame = CGRectMake(0, 0, 320, SEND_BOX_SUPER_CONTENT_VIEW_HEIGHT - SEND_BOX_TOP_VIEW_HEIGHT);
+    self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
+    UITapGestureRecognizer *singleTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(sayByebyeToKeyboard:)];
+    [self.tableView addGestureRecognizer:singleTap];
+//    self.tableView.backgroundColor = [UIColor colorWithWhite:0.5 alpha:0.5];
+    
+    [self.tableView registerClass:[IMMessageTextCell class] forCellReuseIdentifier:textCellIdentifier];
+    [self.tableView registerClass:[IMMessageImageCell class] forCellReuseIdentifier:imageCellIdentifier];
+    [self.tableView registerClass:[IMMessageVoiceCell class] forCellReuseIdentifier:audioCellIdentifier];
+}
+
+/**
+ *  设置消息发送窗体
+ */
+-(void)setupSendBox{
+    IMRecorderMicView *micView = [[IMRecorderMicView alloc] init];
+    [self.view insertSubview:micView aboveSubview:self.tableView];
+    
+    sendBox = [SendBox sendBox];
+    sendBox.friendJID = self.friendJID;
+    sendBox.delegate = self;
+    sendBox.sendMessageVC = self;
+    sendBox.micView = micView;
+    
+    [self.view addSubview:sendBox];
+}
+
+/**
+ *  设置右上角按钮
+ */
+-(void)setRightBarButtonItem{
+    self.rightBtn=[UIButton buttonWithType:UIButtonTypeCustom];
+    self.rightBtn.frame = CGRectMake(0, 0, 28, 28);
+    if ([self.type isEqualToString:@"groupchat"])
+    {
+        [self.rightBtn setImage:[UIImage imageNamed:@"group-info"] forState:UIControlStateNormal];
+        [self.rightBtn setImage:[UIImage imageNamed:@"group-info-sel"] forState:UIControlStateHighlighted];
+    }else
+    {
+        [self.rightBtn setImage:[UIImage imageNamed:@"btn-member-info"] forState:UIControlStateNormal];
+        [self.rightBtn setImage:[UIImage imageNamed:@"btn-member-info-sel"] forState:UIControlStateHighlighted];
+    }
+    [self.rightBtn addTarget:self action:@selector(infoBtnClick:) forControlEvents:UIControlEventTouchUpInside];
+    UIBarButtonItem * buttonItem=[[UIBarButtonItem alloc]initWithCustomView:self.rightBtn];
+    self.navigationItem.rightBarButtonItem = buttonItem;
+    if (self.isInfo == -1) {
+        self.rightBtn.hidden = YES;
+    }
+    
+}
+
+#pragma - mark dataSource
+-(NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section{
+    NSArray *sections = [[self messageFetchedResultsController] sections];
+
+    if (section < [sections count])
+    {
+        id <NSFetchedResultsSectionInfo> sectionInfo = [sections objectAtIndex:section];
+        return sectionInfo.numberOfObjects;
+    }
+    return 0;
+}
+
+-(UITableViewCell*)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath{
+    IMMessageBaseCell *cell;
+    ZMMessage *message = [[self messageFetchedResultsController] objectAtIndexPath:indexPath];
+//    DDLogVerbose(@"%@",message);
+    switch (message.msgType) {
+        case MSG_TYPE_IMAGE: //Image
+            cell = [self configureCellForImage:tableView withData:message withIndexPath:indexPath];
+            break;
+        case MSG_TYPE_AUDIO: //Audio
+            cell = [self configureCellForAudio:tableView withData:message withIndexPath:indexPath];
+            break;
+        case MSG_TYPE_LOCATION: //Location
+            break;
+        case MSG_TYPE_TEXT: //Text
+            cell = [self configureCellForText:tableView withData:message withIndexPath:indexPath];
+            break;
+    }
+    lastIndex = indexPath.row;
+    cell.tableView = tableView;
+    cell.sendMessageVC = self;
+    cell.selectionStyle = UITableViewCellSelectionStyleNone;
+//    cell.backgroundColor = [UIColor colorWithWhite:0.3 alpha:1];
+    return cell;
+}
+
+-(CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath{
+    ZMMessage *message = [[self messageFetchedResultsController] objectAtIndexPath:indexPath];
+    CGFloat height = [message getRowHeight:[self shouldShowTimeLabel:indexPath]];
+    return height;
+}
+
+//-(UIView*)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section{
+//    UIView *headerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 320, 20)];
+//    headerView.backgroundColor = UIColorFromRGB(0xcccccc);
+//    
+//    return headerView;
+//}
+
+#pragma mark - Configure Cell
+/**
+ *  配置文字类型的UITableViewCell
+ *
+ *  @param tableView UITableView
+ *  @param message  XMPPMessageArchiving_Message_CoreDataObject message object
+ *
+ *  @return UITableViewCell
+ */
+-(IMMessageTextCell*)configureCellForText:(UITableView*)tableView withData:(ZMMessage*)message withIndexPath:(NSIndexPath*)indexPath{
+    IMMessageTextCell *cell;
+    cell = [tableView dequeueReusableCellWithIdentifier:textCellIdentifier];
+    cell.shouldShowTimeLabel = [self shouldShowTimeLabel:indexPath];
+
+    [cell configureWithMessage:message withMyPhoto:myPhoto withFriendPhoto:friendPhoto withIndexPath:indexPath];
+
+    return cell;
+}
+
+/**
+ *  配置图片类型的消息的UITableViewCell
+ *
+ *  @param tableView UITableView
+ *  @param bodyDic  NSDictionary
+ *
+ *  @return UITableViewCell
+ */
+-(IMMessageImageCell*)configureCellForImage:(UITableView*)tableView withData:(ZMMessage*)message withIndexPath:(NSIndexPath*)indexPath{
+    IMMessageImageCell *cell = [tableView dequeueReusableCellWithIdentifier:imageCellIdentifier];
+    cell.shouldShowTimeLabel = [self shouldShowTimeLabel:indexPath];
+
+    [cell configureWithMessage:message withMyPhoto:myPhoto withFriendPhoto:friendPhoto withIndexPath:indexPath];
+    return cell;
+}
+
+/**
+ *  配置音频类型Message的UITableViewCell
+ *
+ *  @param tableView UITableView
+ *  @param bodyDic   NSDictionary
+ *
+ *  @return UITableViewCell
+ */
+-(IMMessageVoiceCell*)configureCellForAudio:(UITableView*)tableView withData:(ZMMessage*)message withIndexPath:(NSIndexPath*)indexPath{
+    IMMessageVoiceCell *cell = [tableView dequeueReusableCellWithIdentifier:audioCellIdentifier];
+    cell.shouldShowTimeLabel = [self shouldShowTimeLabel:indexPath];
+    
+    [cell configureWithMessage:message withMyPhoto:myPhoto withFriendPhoto:friendPhoto withIndexPath:indexPath];
+    return cell;
+}
+
+#pragma - mark TableView Delegate
+-(void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath{
+//    [sendBox.textField resignFirstResponder];
+//    sendBox.frame = SEND_BOX_TOP_VIEW_FRAME;
+    
+//    CGRect tvFrame = self.tableView.frame;
+//    tvFrame.size.height = SEND_BOX_SUPER_CONTENT_VIEW_HEIGHT - SEND_BOX_TOP_VIEW_HEIGHT;
+//    self.tableView.frame = tvFrame;
+}
+
+#pragma - mark NSFetchedResultsController
+/**
+ *  搜索本地消息
+ *
+ *  @return NSFetchedResultsController
+ */
+-(NSFetchedResultsController*)messageFetchedResultsController{
+    if (messageFetchedResultsController == nil)
+	{
+		NSManagedObjectContext *moc = [imMessageStorage mainThreadManagedObjectContext];
+		
+		NSEntityDescription *entity = [NSEntityDescription entityForName:@"ZMMessage"
+		                                          inManagedObjectContext:moc];
+        
+        NSSortDescriptor *sd1 = [[NSSortDescriptor alloc] initWithKey:@"timestamp" ascending:YES];
+		
+		NSArray *sortDescriptors = [NSArray arrayWithObjects:sd1, nil];
+		
+        NSPredicate *predidate = [NSPredicate predicateWithFormat:@" friendBareJID == %@ AND myBareJID == %@",self.friendJID.bare,self.MyJID.bare];
+        
+		NSFetchRequest *fetchRequest = [[NSFetchRequest alloc] init];
+		[fetchRequest setEntity:entity];
+		[fetchRequest setSortDescriptors:sortDescriptors];
+        [fetchRequest setPredicate:predidate];
+		[fetchRequest setFetchBatchSize:20];
+//		[fetchRequest setFetchLimit:10];
+//        [request setFetchOffset:_currentPage * 21];
+		messageFetchedResultsController = [[NSFetchedResultsController alloc] initWithFetchRequest:fetchRequest
+		                                                               managedObjectContext:moc
+		                                                                 sectionNameKeyPath:nil
+		                                                                          cacheName:nil];
+		[messageFetchedResultsController setDelegate:self];
+		NSError *error = nil;
+		if (![messageFetchedResultsController performFetch:&error])
+		{
+			DDLogError(@"Error performing fetch: %@", error);
+		}
+        
+	}
+    
+    return messageFetchedResultsController;
+}
+
+
+
+#pragma mark - FetchedResultsController Delegate
+//- (void)controllerWillChangeContent:(NSFetchedResultsController *)controller {
+//    // The fetch controller is about to start sending change notifications, so prepare the table view for updates.
+//    [self.tableView beginUpdates];
+//}
+//
+//- (void)controllerDidChangeContent:(NSFetchedResultsController *)controller {
+//    // The fetch controller has sent all current change notifications, so tell the table view to process all updates.
+//    [self.tableView endUpdates];
+//}
+
+-(void)controller:(NSFetchedResultsController *)controller didChangeObject:(id)anObject atIndexPath:(NSIndexPath *)indexPath forChangeType:(NSFetchedResultsChangeType)type newIndexPath:(NSIndexPath *)newIndexPath{
+
+    switch (type) {
+        case NSFetchedResultsChangeDelete:
+        case NSFetchedResultsChangeInsert:{
+//            [self.tableView reloadRowsAtIndexPaths:@[newIndexPath] withRowAnimation:UITableViewRowAnimationNone];
+            BOOL scrollToBottom = [anObject isGroupChat]?[self isScrolledToBottom]:YES;
+            [self refreshData:scrollToBottom];
+
+            break;
+        }case NSFetchedResultsChangeUpdate:{
+            IMMessageBaseCell *cell = (IMMessageBaseCell*)[self.tableView cellForRowAtIndexPath:indexPath];
+            if (cell.shouldUpdateWhileAttrChanged) {
+                [self.tableView reloadRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationNone];
+                
+            }
+            break;
+        }
+        default:
+            break;
+    }
+//    XMPPMessageArchiving_Message_CoreDataObject *messageObject = anObject;
+//    
+//    IMMessageStorage *messageStorage  = [IMMessageStorage sharedInstance];
+//    ZMMessage *imMessage = [messageStorage insertIMMessage:messageObject];
+}
+
+#pragma mark - Private
+-(void)refreshData{
+    [self refreshData:YES];
+}
+
+-(void)refreshData:(BOOL)scrollToBottom{
+    [self.tableView reloadData];
+    if (scrollToBottom) {
+        [self.tableView scrollToBottom];
+    }
+    if ([sendBox.textField isFirstResponder] && self.tableView.contentSize.height > visibleHeight) {
+        [self keyboardWillShow:nil];
+    }
+}
+
+-(void)moveSendBoxToBottom:(BOOL)animated{
+    if ([sendBox.textField isFirstResponder]) {
+        [sendBox.textField resignFirstResponder];
+    }
+    CGRect tvFrame = self.tableView.frame;
+    tvFrame.origin.y = 0;
+    NSTimeInterval duration = animated ? 0.25f : 0;
+    [UIView animateWithDuration:duration animations:^(){
+        sendBox.frame = SEND_BOX_TOP_VIEW_FRAME;
+        self.tableView.frame = tvFrame;
+    }];
+}
+
+-(BOOL)isScrolledToBottom{
+    CGPoint contentOffsetPoint = self.tableView.contentOffset;
+    CGRect frame = self.tableView.frame;
+    if (ABS((contentOffsetPoint.y - (self.tableView.contentSize.height - frame.size.height))) < 1 || self.tableView.contentSize.height < frame.size.height){
+        return YES;
+    }
+    return NO;
+}
+
+/**
+ *  判断当前cell是否需要显示时间标签。
+ *  往上滑时，需要判断上一条消息的时间与当前消息的时间差，所以index-1
+ *  往下滑时，需要判断的同样是更上一条的消息与当前消息的时间差，所以还是index-1
+ *
+ *  @param indexPath NSIndexPath    当前cell的indexPath
+ *
+ *  @return BOOL
+ */
+-(BOOL)shouldShowTimeLabel:(NSIndexPath*)indexPath{
+    if (indexPath.row == 0) {
+        return YES;
+    }
+    BOOL result = NO;
+    ZMMessage *message = [[self messageFetchedResultsController] objectAtIndexPath:indexPath];
+    NSInteger index = indexPath.row - 1;
+    ZMMessage *lastMessage = [[self messageFetchedResultsController] objectAtIndexPath:[NSIndexPath indexPathForRow:index inSection:indexPath.section]];
+
+    _lastMessageTime = lastMessage.timestamp;
+    
+    NSTimeInterval lastTime = [lastMessage.timestamp timeIntervalSince1970];
+    NSTimeInterval currentTime = [message.timestamp timeIntervalSince1970];
+    NSTimeInterval timeDiff = currentTime - lastTime;
+    
+    if (abs(timeDiff) > MSG_SHOW_TIME_DIFF) {
+        result = YES;
+    }
+    
+    return result;
+}
+
+#pragma - mark SendBox Delegate
+
+-(void)keyboardWillShow:(NSNotification *)notification{
+    NSDictionary* info = [notification userInfo];
+    CGSize kbSize = [[info objectForKey:UIKeyboardFrameEndUserInfoKey] CGRectValue].size;
+    if (kbSize.height == 0) {
+        kbSize = keyboardSize;
+    }else{
+        keyboardSize = kbSize;
+    }
+    
+    CGRect frame = CGRectMake(0, SEND_BOX_SUPER_CONTENT_VIEW_HEIGHT - kbSize.height - SEND_BOX_TOP_VIEW_HEIGHT, 320, SEND_BOX_TOP_VIEW_HEIGHT);
+    
+    [UIView animateWithDuration:0.25 animations:^(){
+        sendBox.frame = frame;
+    }];
+    
+    CGRect tvFrame = self.tableView.frame;
+    CGFloat contentHeight = SEND_BOX_SUPER_CONTENT_VIEW_HEIGHT - SEND_BOX_TOP_VIEW_HEIGHT - kbSize.height;
+    CGFloat heightOffset = self.tableView.contentSize.height - contentHeight;
+    if (heightOffset > 0){
+        heightOffset = heightOffset > kbSize.height ? kbSize.height : heightOffset;
+        tvFrame.origin.y = -heightOffset;
+        [UIView animateWithDuration:0.25 animations:^(){
+            self.tableView.frame = tvFrame;
+        } completion:^(BOOL flag){
+            [self.tableView scrollToBottom];
+        }];
+    }
+    
+}
+
+-(void)keyboardWillBeHidden:(NSNotification *)notification{
+//    NSDictionary* info = [notification userInfo];
+//    CGSize kbSize = [[info objectForKey:UIKeyboardFrameEndUserInfoKey] CGRectValue].size;
+
+//    if ([sendBox onlyActiveTopViewShown]) {
+//        return;
+//    }
+//    float animationDuration = [[info objectForKey:UIKeyboardAnimationDurationUserInfoKey] floatValue];
+//    [UIView animateWithDuration:animationDuration animations:^(){
+//        sendBox.frame = SEND_BOX_TOP_VIEW_FRAME;
+//        
+//        CGRect tvFrame = self.tableView.frame;
+//        tvFrame.origin.y = 0;
+//        self.tableView.frame = tvFrame;
+//    }];
+
+}
+
+-(void)detailViewWillShow:(SendBox *)aSendBox{
+    CGRect tvFrame = self.tableView.frame;
+    aSendBox.textField.hidden = NO;
+    aSendBox.soundButton.hidden = YES;
+    aSendBox.micButton.hidden = NO;
+    aSendBox.keyboardButton.hidden = YES;
+    
+    CGFloat contentHeight = SEND_BOX_SUPER_CONTENT_VIEW_HEIGHT - SEND_BOX_FULL_VIEW_HEIGHT;
+    CGFloat heightOffset = self.tableView.contentSize.height - contentHeight;
+    
+    if (heightOffset>0) {
+        heightOffset = heightOffset > SEND_BOX_FULL_VIEW_HEIGHT - 44 ? SEND_BOX_FULL_VIEW_HEIGHT - 44 : heightOffset;
+        tvFrame.origin.y = -heightOffset;
+    }else{
+        tvFrame.origin.y = 0;
+    }
+    
+    [UIView animateWithDuration:0.25 animations:^(){
+        aSendBox.frame = SEND_BOX_FULL_VIEW_FRAME;
+        self.tableView.frame = tvFrame;
+    }completion:^(BOOL flag){
+        [self.tableView scrollToBottom];
+
+    }];
+
+
+    
+//    self.tableView.frame = tvFrame;
+//    aSendBox.frame = SEND_BOX_FULL_VIEW_FRAME;
+//    [self.tableView scrollToBottomWithoutAnimation];
+    
+    /*
+    CGRect tvFrame = self.tableView.frame;
+    CGFloat contentHeight = SEND_BOX_SUPER_CONTENT_VIEW_HEIGHT - SEND_BOX_TOP_VIEW_HEIGHT - kbSize.height;
+    CGFloat heightOffset = self.tableView.contentSize.height - contentHeight;
+    if (heightOffset > 0){
+        heightOffset = heightOffset > kbSize.height ? kbSize.height : heightOffset;
+        tvFrame.origin.y = -heightOffset;
+        [UIView animateWithDuration:0.25 animations:^(){
+            self.tableView.frame = tvFrame;
+        } completion:^(BOOL flag){
+            [self.tableView scrollToBottom];
+        }];
+    }
+*/
+}
+
+-(void)detailViewWillHide:(SendBox *)aSendBox animated:(BOOL)animated{
+    [self moveSendBoxToBottom:animated];
+}
+
+-(void)keyboardWillChangeFrame:(NSNotification*)notification{
+   
+//    NSDictionary* info = [notification userInfo];
+//    CGSize kbSize = [[info objectForKey:UIKeyboardFrameEndUserInfoKey] CGRectValue].size;
+//     /*
+//    CGRect tvFrame = self.tableView.frame;
+//    tvFrame.size.height = SEND_BOX_SUPER_CONTENT_VIEW_HEIGHT - SEND_BOX_TOP_VIEW_HEIGHT - kbSize.height;
+//
+//    [UIView animateWithDuration:0.25 animations:^(){
+//        self.tableView.frame = tvFrame;
+//    } completion:^(BOOL flag){
+//        [self.tableView scrollToBot tom];
+//    }];*/
+//    
+//    
+//    [UIView animateWithDuration:0.25 animations:^(){
+//        CGRect tvFrame = self.tableView.frame;
+//        tvFrame.origin.y = SEND_BOX_SUPER_CONTENT_VIEW_HEIGHT - SEND_BOX_TOP_VIEW_HEIGHT - kbSize.height -tvFrame.size.height ;
+//        if (self.tableView.contentSize.height > tvFrame.origin.y){
+//            self.tableView.frame = tvFrame;
+//        }
+//    } completion:^(BOOL flag){
+//        [self.tableView scrollToBottom];
+//    }];
+}
+
+#pragma mark - UIScrollView Delegate
+-(void)scrollViewWillBeginDragging:(UIScrollView *)scrollView{
+//    [sendBox.textField resignFirstResponder];
+    [self moveSendBoxToBottom:YES];
+}
+
+#pragma mark - Keyboard Notification
+-(void)setupKeyboardNotification{
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(keyboardWillShow:)
+                                                 name:UIKeyboardWillShowNotification object:nil];
+    
+//    [[NSNotificationCenter defaultCenter] addObserver:self
+//                                             selector:@selector(keyboardWillBeHidden:)
+//                                                 name:UIKeyboardWillHideNotification object:nil];
+    
+//    [[NSNotificationCenter defaultCenter] addObserver:self
+//                                             selector:@selector(keyboardWillChangeFrame:)
+//                                                 name:UIKeyboardWillChangeFrameNotification
+//                                               object:nil];
+}
+
+@end

@@ -1,0 +1,679 @@
+//
+//  SendBox.m
+//  manpower
+//
+//  Created by WangShunzhou on 14-6-9.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import "SendBox.h"
+#import "AppDelegate.h"
+#import "XMPPManager.h"
+#import "RLSendMessageVC.h"
+#import "AFNetworking.h"
+#import "IMMessageHelper.h"
+#import "UIView+UIViewExt.h"
+#import "NSTimer+Blocks.h"
+#import "VoiceConverter.h"
+#import "IMRecorder.h"
+#import "Define.h"
+#import "ZMMessage.h"
+#import "IMMessageStorage.h"
+#import "IMRecorderMicView.h"
+#import "UIImage+SWImage.h"
+#import "FaceBoard.h"
+#import "QBImagePickerController.h"
+#import "RLBaseNC.h"
+
+#define ADD_BUTTON_TAG 100
+#define TEXT_FIELD_TAG 101
+#define TOP_VIEW_TAG 102
+#define BOTTOM_VIEW_TAG 103
+#define TOGGLE_BUTTON_TAG 104
+#define SOUND_BUTTON_TAG 105
+
+#define PHOTO_BUTTON_TAG 200
+#define CAMERA_BUTTON_TAG 201
+#define LOCATION_BUTTON_TAG 202
+
+#define SENDBOX_KEYBOARD_BUTTON_FRAME_RIGHT CGRectMake(287,11,28,22)
+#define SENDBOX_KEYBOARD_BUTTON_FRAME_LEFT  CGRectMake(41,11,28,22)
+
+@interface SendBox() <FaceBoardDelegate, QBImagePickerControllerDelegate>{
+    BOOL isRecording;
+    CGFloat keyboardHeight;
+}
+
+@end
+
+@implementation SendBox
+#pragma mark - Life cycle
+
++ (SendBox*)sendBox{
+    NSArray* nibs = [[NSBundle mainBundle] loadNibNamed:@"SendBox" owner:self options:nil];
+    SendBox *sendBox = nil;
+    if ([nibs count]) {
+        sendBox = [nibs objectAtIndex:0];
+    }
+    [sendBox setupSendBox];
+    sendBox.frame = SEND_BOX_TOP_VIEW_FRAME;
+    sendBox.bottomView.hidden = NO;
+    return sendBox;
+}
+- (void)setupSendBox
+{
+    self.textField.delegate = self;
+
+    [self.soundButton addTarget:self action:@selector(soundButtonUpInside:) forControlEvents:UIControlEventTouchUpInside];
+    [self.soundButton addTarget:self action:@selector(soundButtonUpOutside:) forControlEvents:UIControlEventTouchUpOutside];
+    [self.soundButton addTarget:self action:@selector(soundButtonDown:) forControlEvents:UIControlEventTouchDown];
+    [self.soundButton addTarget:self action:@selector(soundButtonDragExit:) forControlEvents:UIControlEventTouchDragExit];
+    [self.soundButton addTarget:self action:@selector(soundButtonDragEnter:) forControlEvents:UIControlEventTouchDragEnter];
+    
+    
+    xmpp = [XMPPManager sharedInstance];
+    //        self.backgroundColor = [UIColor clearColor];
+    
+    
+    self.faceBoard = [[FaceBoard alloc] init];
+    self.faceBoard.delegate = self;
+    self.faceBoard.inputTextField = self.textField;
+
+}
+
+-(void)awakeFromNib{
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(keyboardWillShow:)
+                                                 name:UIKeyboardWillShowNotification object:nil];
+    
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(keyboardWillBeHidden:)
+                                                 name:UIKeyboardWillHideNotification object:nil];
+    
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(keyboardWillChangeFrame:)
+                                                 name:UIKeyboardWillChangeFrameNotification
+                                               object:nil];
+}
+-(void)dealloc{
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
+#pragma mark - keyboard delegate
+-(void)keyboardWillChangeFrame:(NSNotification*)notification{/*
+    NSDictionary* info = [notification userInfo];
+    self.keyboardFrame = [[info objectForKey:UIKeyboardFrameEndUserInfoKey] CGRectValue];
+    CGSize kbSize = self.keyboardFrame.size;
+//    DDLogVerbose(@"kbSize   width = %f, height = %f",kbSize.width, kbSize.height);
+    CGRect frame = CGRectMake(0, SEND_BOX_SUPER_CONTENT_VIEW_HEIGHT - kbSize.height - SEND_BOX_TOP_VIEW_HEIGHT, 320, SEND_BOX_TOP_VIEW_HEIGHT);
+    
+    float animationDuration = [[info objectForKey:UIKeyboardAnimationDurationUserInfoKey] floatValue];
+    [UIView animateWithDuration:animationDuration animations:^(){
+        self.frame = frame;
+    }];*/
+}
+
+-(void)keyboardWillShow:(NSNotification*)notification{
+    NSDictionary* info = [notification userInfo];
+    self.keyboardFrame = [[info objectForKey:UIKeyboardFrameEndUserInfoKey] CGRectValue];
+    CGSize kbSize = self.keyboardFrame.size;
+    keyboardHeight = kbSize.height;
+//    CGRect frame = CGRectMake(0, SEND_BOX_SUPER_CONTENT_VIEW_HEIGHT - kbSize.height - SEND_BOX_TOP_VIEW_HEIGHT, 320, SEND_BOX_TOP_VIEW_HEIGHT);
+//    
+//    float animationDuration = [[info objectForKey:UIKeyboardAnimationDurationUserInfoKey] floatValue];
+//    
+//    [UIView animateWithDuration:10 animations:^(){
+//        self.frame = frame;
+//    }];
+//    [self.delegate keyboardWillShow:self];
+    
+//    NSDictionary* info = [notification userInfo];
+//    self.keyboardFrame = [[info objectForKey:UIKeyboardFrameEndUserInfoKey] CGRectValue];
+//    CGSize kbSize = self.keyboardFrame.size;
+//    CGRect frame = CGRectMake(0, SEND_BOX_SUPER_CONTENT_VIEW_HEIGHT - kbSize.height - SEND_BOX_TOP_VIEW_HEIGHT, 320, SEND_BOX_TOP_VIEW_HEIGHT);
+//    
+//    float animationDuration = [[info objectForKey:UIKeyboardAnimationDurationUserInfoKey] floatValue];
+//    [UIView animateWithDuration:animationDuration animations:^(){
+//        self.frame = frame;
+//    }];
+}
+
+-(void)keyboardWillBeHidden:(NSNotification*)notification{
+    NSDictionary* info = [notification userInfo];
+    self.keyboardFrame =[[info objectForKey:UIKeyboardFrameEndUserInfoKey] CGRectValue];
+    CGSize kbSize = self.keyboardFrame.size;
+    keyboardHeight = kbSize.height;
+//    [self.delegate keyboardWillBeHidden:self];
+
+//    float animationDuration = [[info objectForKey:UIKeyboardAnimationDurationUserInfoKey] floatValue];
+//    [UIView animateWithDuration:animationDuration animations:^(){
+//        self.frame = SEND_BOX_TOP_VIEW_FRAME;
+//    }];
+}
+
+#pragma mark - view resize
+- (void)showDetailView{
+    self.frame = SEND_BOX_FULL_VIEW_FRAME;
+    self.bottomView.hidden = NO;
+    [self.delegate detailViewWillShow:self];
+}
+
+- (void)toggleDetailView{
+    if ([self onlyTopViewShown] || [self onlyActiveTopViewShown]) {
+        self.bottomView.hidden = NO;
+        [self.delegate detailViewWillShow:self];
+    }else{
+        self.bottomView.hidden = NO;
+        [self.delegate detailViewWillHide:self animated:YES];
+    }
+    
+}
+
+#pragma mark - IBActions
+-(IBAction)addButtonClicked:(id)sender{
+    [self.textField resignFirstResponder];
+    [self toggleDetailView];
+//    [NSTimer scheduledTimerWithTimeInterval:1.0 block:^(){
+//        NSLog(@"Enter the block");
+//    } repeats:NO];
+    
+//    NSString *filePath = [[NSBundle mainBundle] pathForResource:@"123" ofType:@"amr"];
+//    NSString *amrFilePath = [NSString stringWithFormat:@"%@/123.wav",VOICE_DIR_PATH];
+//    NSURL *url = [NSURL fileURLWithPath:amrFilePath];
+//
+//    [IMMessageHelper createDirectory:VOICE_DIR_PATH];
+//    [VoiceConverter amrToWav:filePath wavSavePath:amrFilePath];
+//    player = [[AVAudioPlayer alloc] initWithContentsOfURL:url error:nil];
+//    if ([player prepareToPlay]) {
+//        [player play];
+//    }
+    
+//    NSString *wavPath = [NSString stringWithFormat:@"%@/111.wav",TMP_DIR_PATH];
+//    [[AVAudioSession sharedInstance] setCategory: AVAudioSessionCategoryPlayAndRecord error:nil];
+//    [[AVAudioSession sharedInstance] setActive:YES error:nil];
+//    
+//    player = [[AVAudioPlayer alloc] initWithContentsOfURL:[NSURL fileURLWithPath:wavPath] error:nil];
+//    player.delegate = self;
+//    [player prepareToPlay];
+//    [player play];
+}
+
+-(IBAction)keyboardButton2Clicked:(id)sender{
+    if ([self.textField isFirstResponder]) {
+        [self.textField resignFirstResponder];
+    }
+    self.micButton.hidden = NO;
+    self.keyboardButton2.hidden = YES;
+    self.keyboardButton.hidden = YES;
+    self.emotionButton.hidden = NO;
+    self.textField.inputView = nil;
+    [self.textField becomeFirstResponder];
+    
+//    [self changeKeyboardButtonStatus:YES];
+}
+
+-(IBAction)keyboardButtonClicked:(id)sender{
+    if ([self.textField isFirstResponder]) {
+        [self.textField resignFirstResponder];
+    }
+    self.keyboardButton.hidden = YES;
+    self.keyboardButton2.hidden = YES;
+    self.textField.inputView = nil;
+
+//    [self changeKeyboardButtonStatus:NO];
+    self.micButton.hidden = NO;
+    self.emotionButton.hidden = NO;
+    self.textField.hidden = NO;
+    self.soundButton.hidden = YES;
+    self.bottomView.hidden = YES;
+    [self.textField becomeFirstResponder];
+    
+}
+
+-(IBAction)micButtonClicked:(id)sender{
+    self.micButton.hidden = YES;
+    self.keyboardButton.hidden = NO;
+//    [self changeKeyboardButtonStatus:NO];
+
+    
+    self.textField.hidden = YES;
+    self.soundButton.hidden = NO;
+    self.bottomView.hidden = YES;
+    self.keyboardButton2.hidden = !self.keyboardButton.hidden;
+    self.emotionButton.hidden = NO;
+
+//    self.shouldMoveToBottom = YES;
+//    [self.textField resignFirstResponder];
+    [self.sendMessageVC moveSendBoxToBottom:YES];
+}
+
+-(IBAction)emotionButtonClicked:(id)sender{
+    if ([self.textField isFirstResponder]) {
+        [self.textField resignFirstResponder];
+    }
+    self.bottomView.hidden = YES;
+    self.textField.inputView = (UIView*)self.faceBoard;
+    [self.textField becomeFirstResponder];
+
+    
+    self.keyboardButton2.hidden = NO;
+    self.emotionButton.hidden = YES;
+    self.micButton.hidden = NO;
+    self.soundButton.hidden = YES;
+    self.textField.hidden = NO;
+    self.keyboardButton.hidden = !self.keyboardButton2.hidden;
+//    [self changeKeyboardButtonStatus:YES];
+
+}
+
+-(IBAction)toggleButtonClicked:(id)sender{
+    self.soundButton.hidden = !self.soundButton.hidden;
+    [self setToggleButtonStatus];
+}
+
+
+
+-(IBAction)photoButtonClicked:(id)sender{
+	DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+//    UIImagePickerControllerSourceType sourceType;
+//    sourceType = UIImagePickerControllerSourceTypePhotoLibrary;
+//    NSArray *arr = [UIImagePickerController availableMediaTypesForSourceType:sourceType];
+//    if ( arr ) {
+//        [self showImagePicker:sourceType];
+//    }
+    
+    QBImagePickerController *pickerController = [[QBImagePickerController alloc] init];
+    pickerController.sendBarButtonItemNormalImage = [UIImage imageNamed:@"group-info"];
+    pickerController.sendBarButtonItemHighlightedImage = [UIImage imageNamed:@"group-info-sel"];
+    pickerController.previewBarButtonItemNormalImage = [UIImage imageNamed:@"group-info"];
+    pickerController.previewBarButtonItemHighlightedImage = [UIImage imageNamed:@"group-info-sel"];
+    pickerController.toolbarBackgroundImage = [UIImage imageNamed:@"title_bg"];
+    
+    pickerController.delegate = self;
+    pickerController.allowsMultipleSelection = YES;
+    pickerController.maximumNumberOfSelection = 9;
+    pickerController.minimumNumberOfSelection = 1;
+    pickerController.filterType = QBImagePickerControllerFilterTypePhotos;
+    
+    pickerController.showCameraButton = YES;
+    pickerController.cameraButtonImage = [UIImage imageNamed:@"camera"];
+
+    RLBaseNC *navPickerController = [[RLBaseNC alloc] initWithRootViewController:pickerController];
+    [navPickerController.navigationBar setTitleTextAttributes:@{NSForegroundColorAttributeName:[UIColor whiteColor]}];
+    navPickerController.navigationBar.tintColor = [UIColor whiteColor];
+//    if (iOS7) {
+//        [navPickerController.navigationBar setBackgroundImage:[UIImage imageNamed:@"title_bg_ios7"] forBarMetrics:UIBarMetricsDefault];
+//    }else{
+//        [navPickerController.navigationBar setBackgroundImage:[UIImage imageNamed:@"title_bg"] forBarMetrics:UIBarMetricsDefault];
+//    }
+//    [self.sendMessageVC.navigationController pushViewController:pickerController animated:NO];
+    
+    
+    
+    if (self.frame.origin.y < SEND_BOX_TOP_VIEW_FRAME.origin.y) {
+        [self.delegate detailViewWillHide:self animated:YES];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self.sendMessageVC presentViewController:navPickerController animated:YES completion:NULL];
+        });
+    }else{
+         [self.sendMessageVC presentViewController:navPickerController animated:YES completion:NULL];
+    }
+
+
+
+}
+
+-(IBAction)cameraButtonClicked:(id)sender{
+	DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+    UIImagePickerControllerSourceType sourceType;
+    sourceType = UIImagePickerControllerSourceTypeCamera;
+    NSArray *arr = [UIImagePickerController availableMediaTypesForSourceType:sourceType];
+    if ( arr ) {
+        [self showImagePicker:sourceType];
+    }
+}
+
+-(IBAction)locationButtonClicked:(id)sender{
+	DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+}
+
+/**
+ *  转换键盘按键显示状态
+ *
+ *  @param flag BOOL 为YES，转换keyboardButton; 为NO，转换keyboardButton2
+ */
+-(void)changeKeyboardButtonStatus:(BOOL)flag{
+    if (flag) {
+        self.keyboardButton.hidden = !self.keyboardButton2.hidden;
+    }else{
+        self.keyboardButton2.hidden = !self.keyboardButton.hidden;
+    }
+    self.emotionButton.hidden = !self.keyboardButton2.hidden;
+    self.micButton.hidden = !self.keyboardButton.hidden;
+}
+
+#pragma mark - IBActions - About recording
+// Sound button IBActions
+// ======================================================
+// 按下开始录音
+-(IBAction)soundButtonDown:(id)sender{
+    DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+//    [self.sendMessageVC hideHUD:NO];
+//    [self.sendMessageVC showHUD:ALERT_TEXT_PREPARING_RECORDING];
+    isRecording = YES;
+    recorder = [IMMessageHelper getRecorder];
+    recorder.delegate = self;
+    [self.micView clear];
+    [self.micView switchToMic];
+    
+    if ([recorder prepareToRecord]) {
+        [[AVAudioSession sharedInstance] setCategory: AVAudioSessionCategoryPlayAndRecord error:nil];
+        [[AVAudioSession sharedInstance] setActive:YES error:nil];
+        [recorder record];
+//        [self.sendMessageVC hideHUD:NO];
+//        [self.sendMessageVC showHUD:ALERT_TEXT_SLIDE_UP_CANCEL];
+        recorderSpy = [NSTimer scheduledTimerWithTimeInterval:0.2 target:self selector:@selector(updateVoicePower) userInfo:nil repeats:YES];
+    }else{
+        [self.sendMessageVC showStringHUD:@"录音失败！也许你正开着其他录音软件；也许是上一次录音还没有完成；也许，没有也许。" second:3];
+    }
+
+}
+
+// 按键内松开，存储并发送录音
+-(IBAction)soundButtonUpInside:(id)sender{
+    DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+//    [self.sendMessageVC hideHUD];
+    if (!isRecording) {
+        return;
+    }
+    isRecording = NO;
+    [self.micView clear];
+    if ([recorderSpy isValid]) {
+        [recorderSpy invalidate];
+    }
+    // 时间过短，取消发送。
+    if (recorder.currentTime < 0.5) {
+        [recorder stop];
+        [[NSFileManager defaultManager] removeItemAtURL:recorder.url error:nil];
+        return;
+    }
+    [recorder stop];
+    if ([VoiceConverter wavToAmr:recorder.wavTmpFilePath amrSavePath:recorder.amrTmpFilePath]) {
+        [[NSFileManager defaultManager] removeItemAtURL:recorder.url error:nil];
+    }
+    
+//    NSString *wavPath = [NSString stringWithFormat:@"%@/111.wav",TMP_DIR_PATH];
+//    [VoiceConverter amrToWav:recorder.amrTmpFilePath wavSavePath:wavPath];
+    
+//    if (player.playing) {
+//        [player stop];
+//        return;
+//    }
+//    player = [[AVAudioPlayer alloc] initWithContentsOfURL:[NSURL fileURLWithPath:wavPath] error:nil];
+//    player.delegate = self;
+//    [player play];
+    
+    // 2是音频
+    [self sendMessage:2 withAttachment:recorder.amrTmpFilePath];
+//    [self sendMessage:2 withAttachment:recorder.wavTmpFilePath];
+}
+// 按键外松开，删除录音，取消发送
+-(IBAction)soundButtonUpOutside:(id)sender{
+    DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+//    [self.sendMessageVC hideHUD];
+    [self.micView clear];
+    if ([recorderSpy isValid]) {
+        [recorderSpy invalidate];
+    }
+    [recorder stop];
+    [recorder deleteRecording];
+}
+// 手指上划到按键外，提示松开手指取消发送
+-(IBAction)soundButtonDragExit:(id)sender{
+//    [self.sendMessageVC hideHUD:NO];
+//    [self.sendMessageVC showHUD:ALERT_TEXT_TOUCH_UP_CANCEL animated:NO];
+    
+    [self.micView switchToRecycle];
+    DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+}
+// 手指上划到按键外后回到按键内，效果跟直接按下相同
+-(IBAction)soundButtonDragEnter:(id)sender{
+//    [self.sendMessageVC hideHUD:NO];
+//    [self.sendMessageVC showHUD:ALERT_TEXT_SLIDE_UP_CANCEL animated:NO];
+    [self.micView switchToMic];
+
+    DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+}
+// ======================================================
+#pragma mark - Public
+-(BOOL)onlyTopViewShown{
+//    DDLogVerbose(@"y1= %f",(SEND_BOX_SUPER_CONTENT_VIEW_HEIGHT - SEND_BOX_TOP_VIEW_HEIGHT));
+//    DDLogVerbose(@"y2= %f",(SEND_BOX_SUPER_CONTENT_VIEW_HEIGHT - keyboardHeight - SEND_BOX_TOP_VIEW_HEIGHT));
+    return (self.frame.origin.y == SEND_BOX_SUPER_CONTENT_VIEW_HEIGHT - SEND_BOX_TOP_VIEW_HEIGHT);
+}
+
+-(BOOL)onlyActiveTopViewShown{
+//    DDLogVerbose(@"y1= %f",(SEND_BOX_SUPER_CONTENT_VIEW_HEIGHT - SEND_BOX_TOP_VIEW_HEIGHT));
+//    DDLogVerbose(@"y2= %f",(SEND_BOX_SUPER_CONTENT_VIEW_HEIGHT - keyboardHeight - SEND_BOX_TOP_VIEW_HEIGHT));
+    return (self.frame.origin.y == SEND_BOX_SUPER_CONTENT_VIEW_HEIGHT - keyboardHeight - SEND_BOX_TOP_VIEW_HEIGHT);
+}
+
+#pragma mark - Private
+-(void)showImagePicker:(UIImagePickerControllerSourceType)sourceType{
+    UIImagePickerController *imagePicker = [[UIImagePickerController alloc] init];
+    imagePicker.delegate = self;
+    imagePicker.sourceType = sourceType;
+//    imagePicker.allowsEditing = YES;
+    [self.sendMessageVC presentViewController:imagePicker animated:YES completion:^(){}];
+}
+
+-(void)setToggleButtonStatus{
+    // 处于发文字界面
+    if (self.soundButton.hidden) {
+        [self.toggleButton setTitle:@"S" forState:UIControlStateNormal];
+    }else{
+        // 发于发语音界面
+        [self.toggleButton setTitle:@"T" forState:UIControlStateNormal];
+    }
+    
+//    if (player.playing) {
+//        [player stop];
+//        return;
+//    }
+
+
+}
+
+/**
+ *  图形化更新音量大小
+ */
+-(void)updateVoicePower{
+    [recorder updateMeters];//刷新音量数据
+    if(recorder.currentTime >= 60){
+        [self soundButtonUpInside:nil];
+    }
+    //获取音量的平均值  [recorder averagePowerForChannel:0];
+    //音量的最大值  [recorder peakPowerForChannel:0];
+    float voicePower = pow(10, (0.05 * [recorder peakPowerForChannel:0])); //返回值在0-1之间
+    //音量图形化显示
+    DDLogVerbose(@"==========Voice: %f===========",[recorder peakPowerForChannel:0]);
+    [self.micView updateVolume:voicePower withCurrentTime:recorder.currentTime];
+    
+}
+
+-(void)wavToAmr{
+    DDLogVerbose(@"========WAV file path:==========\n%@",recorder.wavTmpFilePath);
+    DDLogVerbose(@"========AMR file path:==========\n%@",recorder.amrTmpFilePath);
+    [VoiceConverter wavToAmr:recorder.wavTmpFilePath amrSavePath:recorder.amrTmpFilePath];
+}
+
+#pragma mark -
+
+/**
+ *  发消息（音频，图片，文本）
+ *
+ *  @param msgType    NSInteger 0:文本；1:图片；2:音频
+ *  @param attachment id 附件类型为id, 当发图片时附件为UIImage。当发音频时，附件为音频文件的路径(NSString)。
+ */
+-(void)sendMessage:(NSInteger)msgType withAttachment:(id)attachment{
+    IMMessageStorage *messageStorage = [IMMessageStorage sharedInstance];
+    ZMMessage *message = [messageStorage insertIMMessage];
+    XMPPJID *fromJID = xmpp.xmppStream.myJID;
+    XMPPJID *toJID = self.sendMessageVC.friendJID;
+    NSString *type = self.sendMessageVC.type;
+    [message sendMessage:msgType withGroupchatType:type fromJID:fromJID toJID:toJID withAttachment:attachment];
+    
+    /*
+    NSString *fromJID = xmpp.xmppStream.myJID.full;
+    NSString *toJID = self.sendMessageVC.friendJID.full;
+    NSDictionary *parameters = @{URL_FROM_JID_FIELD : fromJID,
+                                 URL_TO_JID_FIELD : toJID,
+                                 URL_MSG_TYPE_FIELD : @(msgType)};
+    
+    IMMessageStorage *messageStorage = [IMMessageStorage sharedInstance];
+    ZMMessage *message = [messageStorage insertIMMessage];
+    message.myBareJID = xmpp.xmppStream.myJID.bare;
+    message.outgoing = YES;
+    message.status = MSG_STATUS_PENDING;
+    message.msgType = msgType;
+    message.type = self.sendMessageVC.type;
+    message.toJID = toJID;
+    message.toBareJID = self.friendJID.bare;
+    message.uuid = [xmpp.xmppStream generateUUID];
+    if ([message isChat]) {
+        message.fromJID = fromJID;
+        message.fromBareJID = xmpp.xmppStream.myJID.bare;
+        message.friendBareJID = self.friendJID.bare;
+    }else if ([message isGroupChat]){
+        NSString *nickname = xmpp.xmppStream.myJID.user;
+        message.fromJID = [NSString stringWithFormat:@"%@/%@",nickname,fromJID];
+        message.fromBareJID = xmpp.xmppStream.myJID.bare;
+        message.friendBareJID = self.friendJID.bare;
+    }else{
+        DDLogError(@"消息类型必须为chat或groupchat, 当前message.type值为: %@",message.type);
+        [message.managedObjectContext deleteObject:message];
+        return;
+    }
+
+    NSDateFormatter *dateFormatter = [[NSDateFormatter alloc] init];
+    [dateFormatter setDateFormat:MSG_SEND_TIME_FORMATTER];
+    NSDate *date = [NSDate date];
+    message.timestamp = date;
+    [xmpp.xmppStream addDelegate:message delegateQueue:dispatch_get_main_queue()];
+    
+    switch (msgType) {
+        case MSG_TYPE_IMAGE:
+            [message sendImage:attachment withParameters:parameters];
+            break;
+            
+        case MSG_TYPE_AUDIO:
+            [message sendVoice:attachment withParameters:parameters];
+            break;
+        
+        case MSG_TYPE_TEXT:
+            [message sendText:attachment];
+            break;
+    }
+    */
+}
+// =======================================================================
+
+#pragma mark - QBImagePickerControllerDelegate
+-(void)imagePickerController:(QBImagePickerController *)imagePickerController didSelectAsset:(ALAsset *)asset{
+    DDLogVerbose(@"%@",asset);
+    UIImage *image = [UIImage imageWithCGImage:[[asset defaultRepresentation] fullResolutionImage]];
+    UIImage *croppedImage = [image imageByScalingToMaxSize:image];
+    [self sendMessage:MSG_TYPE_IMAGE withAttachment:croppedImage];
+    [self.sendMessageVC dismissViewControllerAnimated:YES completion:^(){}];
+}
+
+-(void)imagePickerController:(QBImagePickerController *)imagePickerController didSelectAssets:(NSArray *)assets{
+    DDLogVerbose(@"%@",assets);
+    if ([assets count]) {
+        for (ALAsset *asset in assets) {
+            UIImage *image = [UIImage imageWithCGImage:[[asset defaultRepresentation] fullResolutionImage]];
+            UIImage *croppedImage = [image imageByScalingToMaxSize:image];
+            [self sendMessage:MSG_TYPE_IMAGE withAttachment:croppedImage];
+        }
+        [self.sendMessageVC dismissViewControllerAnimated:YES completion:^(){
+        
+        }];
+    }
+}
+
+-(void)imagePickerController:(QBImagePickerController *)imagePickerController didTakePhoto:(UIImage *)image{
+    UIImage *croppedImage = [image imageByScalingToMaxSize:image];
+    [self sendMessage:MSG_TYPE_IMAGE withAttachment:croppedImage];
+    [self.sendMessageVC dismissViewControllerAnimated:YES completion:NULL];
+}
+
+- (void)imagePickerControllerDidCancel:(QBImagePickerController *)imagePickerController{
+    [self.sendMessageVC dismissViewControllerAnimated:YES completion:^(){
+//        [self.textField becomeFirstResponder];
+    }];
+}
+
+#pragma mark - UIImagePickerControllerDelegate
+//- (void)imagePickerController:(UIImagePickerController *)picker didFinishPickingImage:(UIImage *)image editingInfo:(NSDictionary *)editingInfo{
+//    DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+//    [self.sendMessageVC dismissViewControllerAnimated:YES completion:^(){}];
+//    UIImage *croppedImage = [image imageByScalingToMaxSize:image];
+//    [self sendMessage:MSG_TYPE_IMAGE withAttachment:croppedImage];
+//    return;
+//}
+//- (void)imagePickerController:(UIImagePickerController *)picker didFinishPickingMediaWithInfo:(NSDictionary *)info{
+//    DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+//    UIImage *image = [info objectForKey:UIImagePickerControllerOriginalImage];
+//    
+//    UIImageView *imageView = [[UIImageView alloc] initWithImage:image];
+//    [self addSubview:imageView];
+//    [self.sendMessageVC dismissViewControllerAnimated:YES completion:^(){}];
+//}
+//- (void)imagePickerControllerDidCancel:(UIImagePickerController *)picker{
+//    [self.sendMessageVC dismissViewControllerAnimated:YES completion:^(){}];
+//}
+
+#pragma mark - TextFieldDelegate
+-(BOOL)textFieldShouldBeginEditing:(UITextField *)textField{
+    textField.enablesReturnKeyAutomatically = YES;
+    return YES;
+}
+
+-(BOOL)textFieldShouldReturn:(UITextField *)textField{
+    NSString *text = [self.textField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+//    [self sendText:text];
+    if (text.length) {
+        [self sendMessage:MSG_TYPE_TEXT withAttachment:text];
+//        [self.delegate sendBox:self MessageDidSent:text];
+        self.textField.text = @"";
+    }
+//    [self.textField resignFirstResponder];
+//    self.frame = SEND_BOX_TOP_VIEW_FRAME;
+    return YES;
+}
+
+#pragma mark - AVAudioRecorder Delegate
+- (void)audioRecorderDidFinishRecording:(AVAudioRecorder *)recorder successfully:(BOOL)flag{
+    DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+
+}
+
+- (void)audioRecorderEncodeErrorDidOccur:(AVAudioRecorder *)recorder error:(NSError *)error{
+    DDLogError(@"%@", error);
+}
+
+-(void)audioPlayerDidFinishPlaying:(AVAudioPlayer *)player successfully:(BOOL)flag{
+    DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+
+}
+
+#pragma mark - Faceboard delegate
+-(void)faceBoard:(FaceBoard *)faceBoard sendButtonClicked:(id)sender{
+    NSString *text = self.textField.text;
+    if (text.length) {
+        [self sendMessage:MSG_TYPE_TEXT withAttachment:text];
+        self.textField.text = @"";
+    }
+ 
+}
+@end

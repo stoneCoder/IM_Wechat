@@ -1,0 +1,31 @@
+//
+//  RLGroupMemberInfoVC.h
+//  manpower
+//
+//  Created by hanjin on 14-6-11.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import "RLBaseVC.h"
+#import "RLMemberVO.h"
+#import "XMPPManager.h"
+#import "GroupInfoHeadView.h"
+#import "RLSendMessageVC.h"
+#import "RLGroupLogic.h"
+#import "RLInfoCell.h"
+#import "IMAlert.h"
+
+@interface RLGroupMemberInfoVC : RLBaseVC
+@property (strong,nonatomic) RLMemberVO * memberVO;
+@property (strong,nonatomic) XMPPManager *xmpp;
+@property (strong,nonatomic) XMPPRoom *xmppRoom;
+@property (strong,nonatomic) RLGroupLogic *logic;
+@property (strong,nonatomic) UITableView * tableView;
+@property (strong,nonatomic) UIButton *removeButton;
+@property (strong,nonatomic) UIButton *sendButton;
+@property (strong,nonatomic) UIButton *addButton;
+@property (assign,nonatomic) int isOwner;
+
+@property (strong,nonatomic) RLInfoCell *groupNickNameCell;
+@property (strong,nonatomic) RLInfoCell *groupRoleCell;
+@end

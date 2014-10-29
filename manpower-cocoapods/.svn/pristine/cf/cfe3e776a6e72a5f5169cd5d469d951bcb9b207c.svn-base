@@ -1,0 +1,286 @@
+    //
+//  IMMessageBaseCell.m
+//  manpower
+//
+//  Created by WangShunzhou on 14-6-19.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import "IMMessageBaseCell.h"
+#import "RLSendMessageVC.h"
+#import "RLFriendInfoVC.h"
+#import "RLMyInfoVC.h"
+#import "AppDelegate.h"
+#import "IBActionSheet.h"
+#import <objc/runtime.h>
+static void *ResendActionSheetKey = "ResendActionSheetKey";
+
+@interface IMMessageBaseCell()<IBActionSheetDelegate>{
+    UITapGestureRecognizer *singleTap;
+}
+@end
+
+@implementation IMMessageBaseCell
+
+- (id)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier
+{
+    self = [super initWithStyle:style reuseIdentifier:reuseIdentifier];
+    if (self) {
+        self.containerView = [[UIImageView alloc] initWithFrame:CGRectZero];
+        self.photoView = [[UIImageView alloc] initWithFrame:CGRectZero];
+        self.photoView.backgroundColor = [UIColor colorWithWhite:0.5 alpha:1];
+        self.photoView.layer.cornerRadius = MSG_PHOTO_EDGE * 0.5;
+        self.photoView.layer.masksToBounds = YES;
+        self.photoView.userInteractionEnabled = YES;
+        
+        self.resendButton = [UIButton buttonWithType:UIButtonTypeCustom];
+//        self.resendButton.backgroundColor = [UIColor redColor];
+        UIImage *resendButtonImage = [UIImage imageNamed:@"button_resend"];
+        [self.resendButton setBackgroundImage:resendButtonImage forState:UIControlStateNormal];
+        [self.resendButton setFrame:CGRectZero];
+        [self.resendButton addTarget:self action:@selector(resendButtonClicked:) forControlEvents:UIControlEventTouchUpInside];
+        
+        self.nameLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, MSG_CELL_TOP_PADDING, 0, 0)];
+        self.nameLabel.backgroundColor = [UIColor clearColor];
+        self.nameLabel.textColor = [UIColor grayColor];
+        self.nameLabel.font = [UIFont systemFontOfSize:12];
+        
+        self.activityIndicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleGray];
+        
+        self.timeView = [[UIView alloc] initWithFrame: CGRectZero];
+        self.timeView.backgroundColor = UIColorFromRGB(0xCCCCCC);
+        self.timeView.layer.cornerRadius = 4;
+        self.timeView.layer.masksToBounds = YES;
+        
+        self.timeLabel = [[UILabel alloc] initWithFrame: CGRectZero];
+        self.timeLabel.backgroundColor = [UIColor clearColor];
+        self.timeLabel.textColor = [UIColor whiteColor];
+        self.timeLabel.font = [UIFont systemFontOfSize:12];
+        
+        [self.timeView addSubview:self.timeLabel];
+        
+        [self addSubview:self.containerView];
+        [self addSubview:self.photoView];
+        [self addSubview:self.resendButton];
+        [self addSubview:self.activityIndicator];
+        [self addSubview:self.nameLabel];
+        [self addSubview:self.timeView];
+        
+        singleTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(photoViewClicked:)];
+    }
+    return self;
+}
+
+- (void)setSelected:(BOOL)selected animated:(BOOL)animated
+{
+    [super setSelected:selected animated:animated];
+
+    // Configure the view for the selected state
+}
+
+/**
+ *  前置配置，配置在每个Cell的头部。
+ *
+ *  @param message IMMessage
+ */
+-(void)preConfigureCell:(ZMMessage*)message{
+    self.shouldUpdateWhileAttrChanged = YES;
+    self.imMessage = message;
+
+    // 设置时间标签
+    NSTimeInterval msgTime = [message.timestamp timeIntervalSince1970];
+    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+    if (_shouldShowTimeLabel) {        
+        NSDate *now = [NSDate date];
+        NSString *todayStr = [formatter stringFromDate:now];
+        NSDate *todayDate = [formatter dateFromString:todayStr];
+        
+        if (msgTime > [todayDate timeIntervalSince1970]) {
+            [formatter setDateFormat:@"a hh:mm"];
+        }else if(msgTime > ([todayDate timeIntervalSince1970] - 86400)){
+            [formatter setDateFormat:@"昨天 a hh:mm"];
+        }else{
+            [formatter setDateFormat:@"MM-dd a hh:mm"];
+        }
+        
+        self.timeLabel.text = [formatter stringFromDate:message.timestamp];
+        [self.timeLabel sizeToFit];
+        self.timeView.frame = CGRectMake(0, 0, self.timeLabel.frame.size.width + MSG_TEXT_MARGIN_H * 2, self.timeLabel.frame.size.height);
+        self.timeView.center = ccp(160,15);
+        self.timeLabel.center = ccp(self.timeView.frame.size.width * 0.5, self.timeView.frame.size.height * 0.5 );
+    }else{
+        self.timeView.frame = CGRectZero;
+    }
+    
+    // 设置群消息界面用户昵称
+    self.nameLabel.text = message.nickname;
+    [self.nameLabel sizeToFit];
+    CGFloat posY = MSG_CELL_TOP_PADDING;
+    if (self.shouldShowTimeLabel) {
+        posY += MSG_TIME_LABEL_HEIGHT;
+    }
+    if (message.outgoing) {
+        self.nameLabel.layer.anchorPoint = ccp(1,0);
+        self.nameLabel.layer.position = ccp(MSG_SENT_PHOTO_X - MSG_TEXT_MARGIN_H - MSG_BUBBLE_LENGTH,posY);
+    }else{
+        self.nameLabel.layer.anchorPoint = ccp(0,0);
+        self.nameLabel.layer.position = ccp(MSG_RECV_CONTAINER_X + MSG_BUBBLE_LENGTH,posY);
+    }
+}
+
+/**
+ *  Cell的公共配置
+ *
+ *  @param message IMMessage
+ */
+-(void)configureCell:(ZMMessage*)message{
+    // 重发按钮设置
+    if (message.status == MSG_STATUS_FAILURE && message.outgoing) {
+        CGFloat resendButtonEdge = 25;
+        CGRect containerFrame = self.containerView.frame;
+        
+        // 居中显示
+        CGRect resendButtonFrame;
+
+        resendButtonFrame = CGRectMake(0, containerFrame.origin.y , resendButtonEdge, resendButtonEdge);
+        resendButtonFrame.origin.x = containerFrame.origin.x - resendButtonEdge - 20;
+        
+        // 如果是音频消息，左上角显示，利用activityAnimator的位置
+        if (message.msgType == MSG_TYPE_AUDIO) {
+            resendButtonFrame = CGRectMake(0, containerFrame.origin.y , resendButtonEdge, resendButtonEdge);
+            resendButtonFrame.origin.x = containerFrame.origin.x - resendButtonEdge - 10;
+
+        }
+        self.resendButton.frame = resendButtonFrame;
+    }else{
+        self.resendButton.frame = CGRectZero;
+    }
+    
+    // 气泡设置
+    UIImage *image = nil;
+    if (message.outgoing) {
+        image = [UIImage imageNamed:@"bubble_send"];
+    }else{  // 接收信息
+        image = [UIImage imageNamed:@"bubble_recv"];
+    }
+    image = [image stretchableImageWithLeftCapWidth:image.size.width * 0.5 topCapHeight:35];
+    self.containerView.image = image;
+//    self.containerView.backgroundColor = [UIColor colorWithWhite:0 alpha:0.5];
+    
+    
+    
+    // 发送中状态设置
+    CGFloat posY = MSG_CELL_TOP_PADDING;
+    if ([message isGroupChat]) {
+        posY += MSG_NICKNAME_LABEL_HEIGHT;
+    }
+    if (self.shouldShowTimeLabel) {
+        posY += MSG_TIME_LABEL_HEIGHT;
+    }
+    if (message.outgoing && message.status == MSG_STATUS_PENDING && message.msgType != MSG_TYPE_IMAGE) {
+        CGRect containerFrame = self.containerView.frame;
+        CGRect frame = self.activityIndicator.frame;
+        [self.activityIndicator setFrame:CGRectMake(containerFrame.origin.x - frame.size.width - 5, posY, frame.size.width, frame.size.height)];
+//        self.activityIndicator.backgroundColor = [UIColor colorWithWhite:0 alpha:0.5];
+        [self.activityIndicator startAnimating];
+        
+    // 音频接收中
+    }else if (!message.outgoing && message.msgType == MSG_TYPE_AUDIO && message.status == MSG_STATUS_PENDING){
+        CGRect containerFrame = self.containerView.frame;
+        CGRect frame = self.activityIndicator.frame;
+        [self.activityIndicator setFrame:CGRectMake(containerFrame.origin.x + containerFrame.size.width + frame.size.width + 5, posY, frame.size.width, frame.size.height)];
+        [self.activityIndicator startAnimating];
+    }else{
+        [self.activityIndicator stopAnimating];
+    }
+    
+    // 点击好友头像跳转到个人资料
+//    if (!message.outgoing) {
+        [self.photoView addGestureRecognizer:singleTap];
+//    }else{
+//        [self.photoView removeGestureRecognizer:singleTap];
+//    }
+    
+    // 设置群内好友头像
+    if (!message.outgoing && [message isGroupChat]) {
+        NSData *friendPhotoData = [[XMPPManager sharedInstance].xmppvCardAvatarModule photoDataForJID:[XMPPJID jidWithString:message.fromBareJID]];
+        if (friendPhotoData) {
+            [self.photoView setImage:[UIImage imageWithData:friendPhotoData]];
+        }
+    }
+}
+
+-(void)photoViewClicked:(id)sender{
+    if ([self.imMessage.fromBareJID isEqualToString:[[XMPPManager sharedInstance].xmppStream.myJID bare]]) {
+        RLMyInfoVC *myInfoVC = [[RLMyInfoVC alloc] initWithNibName:nil bundle:nil];
+        [self.sendMessageVC.navigationController pushViewController:myInfoVC animated:YES];
+    }else
+    {
+        RLFriendInfoVC *rlFriendInfoVC = [[RLFriendInfoVC alloc] init];
+        rlFriendInfoVC.friendJID = [XMPPJID jidWithString:self.imMessage.fromBareJID];
+        if (![self.imMessage isGroupChat]) {
+            rlFriendInfoVC.backFlag = -1;
+        }
+        [self.sendMessageVC.navigationController pushViewController:rlFriendInfoVC animated:YES];
+    }
+}
+
+-(void)resendButtonClicked:(id)sender{
+    IBActionSheet *actionSheet;
+    void (^block)(NSInteger);
+    
+    
+    actionSheet = [[IBActionSheet alloc] initWithTitle:@"消息发送失败" delegate:self cancelButtonTitle:@"取消" destructiveButtonTitle:@"重新发送" otherButtonTitles: nil];
+
+    if (kReachability) {
+        block = ^(NSInteger buttonIndex){
+            if (buttonIndex == 0) {
+                [self doResend];
+            }
+        };
+    }else{
+        block = ^(NSInteger buttonIndex){
+            if (buttonIndex == 0) {
+                [self.sendMessageVC showStringHUD:@"没有网络让我怎么帮您发呀 -_-" second:3];
+            }
+        };
+    }
+    objc_setAssociatedObject(actionSheet, ResendActionSheetKey,
+                             block, OBJC_ASSOCIATION_COPY);
+    
+    [actionSheet showInView:self.sendMessageVC.view];
+    
+}
+
+-(void)doResend{
+    NSString *fromJID = _imMessage.fromJID;
+    NSString *toJID = _imMessage.toJID;
+    NSDictionary *parameters = @{URL_FROM_JID_FIELD : fromJID,
+                                 URL_TO_JID_FIELD : toJID,
+                                 URL_MSG_TYPE_FIELD : @(_imMessage.msgType)};
+    [[XMPPManager sharedInstance].xmppStream addDelegate:_imMessage delegateQueue:dispatch_get_main_queue()];
+    _imMessage.status = MSG_STATUS_PENDING;
+    [_imMessage save];
+    
+    switch (_imMessage.msgType) {
+        case MSG_TYPE_IMAGE:
+            [_imMessage sendImage:nil withParameters:parameters];
+            break;
+            
+        case MSG_TYPE_AUDIO:
+            [_imMessage sendVoice:nil withParameters:parameters];
+            break;
+            
+        case MSG_TYPE_TEXT:
+            [_imMessage sendText:_imMessage.msg];
+            break;
+    }
+ 
+}
+
+-(void)actionSheet:(IBActionSheet *)actionSheet clickedButtonAtIndex:(NSInteger)buttonIndex{
+    void(^block)(NSInteger) = objc_getAssociatedObject(actionSheet, ResendActionSheetKey);
+    block(buttonIndex);
+}
+
+@end

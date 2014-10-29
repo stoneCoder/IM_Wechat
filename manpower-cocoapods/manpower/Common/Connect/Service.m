@@ -1,0 +1,40 @@
+//
+//  Service.m
+//  AutoTour
+//
+//  Created by hanjin on 14-3-10.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import "Service.h"
+
+@implementation Service
+DEFINE_SINGLETON_FOR_CLASS(Service)
+-(void) post:(NSString*)uri Parameters:(NSDictionary *)parameters  success:(void (^)(AFHTTPRequestOperation * o, id json))success failure:(void (^)(AFHTTPRequestOperation * o, NSError * e))failure{
+    NSString* urlStr=[NSString stringWithFormat:@"%@%@",API,uri];
+    DDLogDebug(@"请求目标域名:%@",urlStr);
+    DDLogDebug(@"请求参数:%@",parameters);
+    AFHTTPRequestOperationManager *manager = [AFHTTPRequestOperationManager manager];
+    manager.responseSerializer.acceptableContentTypes=[NSSet setWithObject:@"application/json"];
+    [manager POST:urlStr parameters:parameters success:success failure:failure];
+  
+}
+-(void) get:(NSString*)uri Parameters:(NSDictionary *)parameters  success:(void (^)(AFHTTPRequestOperation * o, id json))success failure:(void (^)(AFHTTPRequestOperation * o, NSError * e))failure{
+    NSString* urlStr=[NSString stringWithFormat:@"%@%@",API,uri];
+    DDLogInfo(@"请求目标域名:%@",urlStr);
+    DDLogInfo(@"请求参数:%@",parameters);
+    AFHTTPRequestOperationManager *manager = [AFHTTPRequestOperationManager manager];
+    manager.responseSerializer.acceptableContentTypes=[NSSet setWithObjects:@"application/json",@"text/html",nil];
+//    manager.requestSerializer.
+    [manager GET:urlStr parameters:parameters success:^(AFHTTPRequestOperation *operation, id responseObject) {
+        DDLogInfo(@"%@",responseObject);
+        success(operation,responseObject);
+    } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
+        DDLogError(@"%@",error);
+        failure(operation,error);
+    }];
+}
+
+
+
+@end

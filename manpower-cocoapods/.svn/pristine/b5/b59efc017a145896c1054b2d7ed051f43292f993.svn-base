@@ -1,0 +1,512 @@
+//
+//  RLGroupSetInfoVC.m
+//  manpower
+//
+//  Created by hanjin on 14-6-11.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import "RLGroupSetInfoVC.h"
+#import "GroupInfoHeadView.h"
+#import "RLGroupLogic.h"
+#import "RLGroupMemberListVC.h"
+#import "RLGroupInviteVC.h"
+#import "RLGroupChatVC.h"
+#import "RLGroupVO.h"
+#import "RLGroupMemberJoinVC.h"
+#import "IMMessageStorage.h"
+#import "RLMyInfoHeaderView.h"
+#import <XMPPRoomCoreDataStorage.h>
+#import "RLGroupDescriptionVC.h"
+
+@interface RLGroupSetInfoVC ()
+{
+    NSString * sum;
+    NSString * onlineCount;
+    NSArray * roomUsersList;
+    NSString * showMsg;
+    UILabel *signatureLabel;
+    UIView *footerView;
+    RLMyInfoHeaderView *headerView;
+    RLGroupVO *group;
+}
+@property (strong,nonatomic) RLGroupLogic * logic;
+@property (strong,nonatomic) RLMyInfoHeaderView *headerView;
+
+@end
+
+static UITableViewCell * memberCell;
+
+
+@implementation RLGroupSetInfoVC
+@synthesize headerView;
+@synthesize group;
+
+
+- (id)initWithNibName:(NSString *)nibNameOrNil bundle:(NSBundle *)nibBundleOrNil
+{
+    self = [super initWithNibName:nibNameOrNil bundle:nibBundleOrNil];
+    if (self) {
+        // Custom initialization
+        self.xmppStream=[XMPPManager sharedInstance].xmppStream;
+        [self.xmppStream addDelegate:self delegateQueue:dispatch_get_main_queue()];
+        
+    }
+    return self;
+}
+
+- (void)viewDidLoad
+{
+    [super viewDidLoad];
+    if (!group) {
+        group = [[RLGroupVO alloc] init];
+    }
+    
+    [self makeNaviLeftButtonVisible:YES];
+    
+    [self setTitleText:@"群资料"];
+    
+    [self setupHeaderView];
+    
+    footerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 320, 100)];
+    self.tableView.tableFooterView = footerView;
+    self.logic=[RLGroupLogic sharedRLGroupLogic];
+    [self.logic searchGroupInfoByName:self.roomJID.user andUserJID:_xmppStream.myJID.bare success:^(id json){
+        [group setValuesForKeysWithDictionary:[json objectForKey:@"mucroomVo"]];
+        group.owner = [json objectForKey:@"owner"];
+        group.ownerName = [json objectForKey:@"ownerName"];
+        
+    } failure:^(NSError *err){
+        DDLogError(@"%@",err);
+    }];
+    [self getListDataWithPage];
+    
+    
+//    if (self.isOwner) {
+//        <#statements#>
+//    }
+}
+
+#pragma mark - Initailize views
+-(void)setupHeaderView{
+    headerView = [RLMyInfoHeaderView headerView];
+    
+    // 设置tableview大小
+    [self.tableView setFrame:CGRectMake(0, 0, self.view.frame.size.width, self.view.frame.size.height-64)];
+    self.tableView.tableHeaderView = headerView;
+    
+    [self bindValuesToView];
+}
+
+-(void)bindValuesToView{
+    @weakify(self);
+    
+     [RACObserve(group, roomNaturalLanguageName) subscribeNext:^(NSString *newString){
+         @strongify(self);
+         self.headerView.nameTF.text = newString;
+     }];
+    
+    [RACObserve(group, ownerName) subscribeNext:^(NSString *newString){
+        @strongify(self);
+        self.headerView.usernameLabel.text = [NSString stringWithFormat:@"群主:%@", newString];
+    }];
+    
+}
+
+
+#pragma mark - tableview datasource
+-(CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath{
+    CGFloat height = 44;
+
+    if (indexPath.section == 0 && indexPath.row == 3){
+        signatureLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 200, 15)];
+        signatureLabel.font = [UIFont systemFontOfSize:14];
+        signatureLabel.numberOfLines = 0;
+        signatureLabel.text = group.roomDescription;
+        [signatureLabel sizeToFit];
+        height = signatureLabel.frame.size.height+20;
+        height = height < 44 ? 44 :height;
+    }
+    return height;
+}
+
+-(NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section{
+    return 4;
+}
+
+-(UITableViewCell*)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath{
+    static NSString *cellIdentifier = @"GroupInfoCell";
+    
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:cellIdentifier];
+    if (cell == nil) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:cellIdentifier];
+        cell.detailTextLabel.textColor = UIColorFromRGB(0x999999);
+//        cell.detailTextLabel.frame = CGRectMake(100, 0, 200, 44);
+        cell.detailTextLabel.textAlignment = NSTextAlignmentLeft;
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+    }
+    NSString *title;
+    NSString *detailText = @"...";
+    
+    __block UITableViewCell *blockCell = cell;
+    switch (indexPath.row) {
+        case 0:
+            title = @"ID";
+            detailText = self.roomJID.user;
+            break;
+        case 1:{
+            title = @"成员";
+            detailText = @"0/0";
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+            memberCell = cell;
+            break;
+        }case 2:
+            title = @"标签";
+            [RACObserve(group, roomSubject) subscribeNext:^(NSString *newString){
+                blockCell.detailTextLabel.text = newString ? newString : @"";
+            }];
+            cell.accessoryType = self.isOwner == 0 ? UITableViewCellAccessoryDisclosureIndicator : UITableViewCellAccessoryNone;
+            break;
+        case 3:
+            title = @"公告";
+            [RACObserve(group, roomDescription) subscribeNext:^(NSString *newString){
+                blockCell.detailTextLabel.text = newString ? newString : @"";
+                blockCell.detailTextLabel.numberOfLines = 0;
+                [blockCell.detailTextLabel sizeToFit];
+            }];
+            cell.accessoryType = self.isOwner == 0 ? UITableViewCellAccessoryDisclosureIndicator : UITableViewCellAccessoryNone;
+            break;
+            
+        default:
+            break;
+    }
+    cell.textLabel.text = title;
+    cell.detailTextLabel.text = detailText;
+    return cell;
+}
+
+
+#pragma mark - tableview delegate
+
+-(void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath{
+    switch (indexPath.row) {
+        case 1:
+            [self getMemberList:nil];
+            break;
+        case 2:
+            [self editEditRoomSubject];
+            break;
+        case 3:
+            [self editRoomDescription];
+            break;
+        default:
+            break;
+    }
+}
+
+
+#pragma mark - actions
+-(void)editRoomDescription{
+    if (self.isOwner != 0) {
+        return;
+    }
+    RLGroupDescriptionVC *groupDescVC = [[RLGroupDescriptionVC alloc] init];
+    groupDescVC.group = self.group;
+    [self.navigationController pushViewController:groupDescVC animated:YES];
+}
+
+-(void)editEditRoomSubject{
+    
+}
+
+-(void)getListDataWithPage{
+    [self showHUD];
+    [self.logic getMemberListByGroupName:self.roomJID.user success:^(id json) {
+        [self hideHUD];
+        NSDictionary * dic=(NSDictionary *)json;
+        sum=[dic objectForKey:@"sum"] ;
+        onlineCount=[dic objectForKey:@"onlineCount"] ;
+        memberCell.detailTextLabel.text = [NSString stringWithFormat:@"%@/%@",onlineCount,sum];
+//                self.rlmemberInfoCell.infoLabel.text = [NSString stringWithFormat:@"%@/%@",onlineCount,sum];
+        showMsg=[dic objectForKey:@"showMsg"];
+        roomUsersList=(NSArray *)[dic objectForKey:@"roomUsers"];
+        [self changeButtonFunction:dic];
+    } failure:^(NSError *err) {
+        [self failureHideHUD];
+    }];
+}
+
+-(void)changeButtonFunction:(NSDictionary *)dict
+{
+    if (self.createFlag == 0) {
+        /*判断是否是创建群*/
+        self.finishButton = [UIButton buttonWithType:UIButtonTypeCustom];
+        [self.finishButton setBackgroundImage:[UIImage imageNamed:@"btn-finish"] forState:UIControlStateNormal];
+        [self.finishButton setBackgroundImage:[UIImage imageNamed:@"btn-finish-sel"] forState:UIControlStateHighlighted];
+        self.finishButton.frame = CGRectMake(9, self.rlmemberInfoCell.frame.origin.y + 76, 302, 44);
+        [self.finishButton addTarget:self action:@selector(finishCreateRoom:) forControlEvents:UIControlEventTouchUpInside];
+        [footerView addSubview:self.finishButton];
+    }else if(self.createFlag == 2) /*通过发送群消息界面进入*/
+    {
+        /*创建者才能删除群*/
+        if (self.isOwner == 0 /*|| self.isOwner == 1*/) {
+            self.dismissButton = [UIButton buttonWithType:UIButtonTypeCustom];
+            [self.dismissButton setBackgroundImage:[UIImage imageNamed:@"btn-del-group"] forState:UIControlStateNormal];
+            [self.dismissButton setBackgroundImage:[UIImage imageNamed:@"btn-del-group-sel"] forState:UIControlStateHighlighted];
+            self.dismissButton.frame = CGRectMake(164, self.rlmemberInfoCell.frame.origin.y + 76, 147, 44);
+            [self.dismissButton addTarget:self action:@selector(dimissRoom:) forControlEvents:UIControlEventTouchUpInside];
+            [footerView addSubview:self.dismissButton];
+            //            self.inviteButton = [[UIButton alloc] init];
+            //            [self.inviteButton setBackgroundImage:[UIImage imageNamed:@"btn-ask-member"] forState:UIControlStateNormal];
+            //            self.inviteButton.frame = CGRectMake(9, self.rltermInfoCell.frame.origin.y + 76, 147, 44);
+            //            [self.inviteButton addTarget:self action:@selector(inviteSomeBodyIntoRoom:) forControlEvents:UIControlEventTouchUpInside];
+            //            [self.view addSubview:self.inviteButton];
+        }else if(self.isOwner != 3)
+        {
+            /*群成员可以退出群*/
+            self.quitButton = [UIButton buttonWithType:UIButtonTypeCustom];
+            [self.quitButton setBackgroundImage:[UIImage imageNamed:@"btn-quit-group"] forState:UIControlStateNormal];
+            [self.quitButton setBackgroundImage:[UIImage imageNamed:@"btn-quit-group-sel"] forState:UIControlStateHighlighted];
+            self.quitButton.frame = CGRectMake(164, self.rlmemberInfoCell.frame.origin.y + 76, 147, 44);
+            [self.quitButton addTarget:self action:@selector(quitFromRoom:) forControlEvents:UIControlEventTouchUpInside];
+            [footerView addSubview:self.quitButton];
+        }else if(self.isOwner == 3)
+        {
+            /*非群成员申请加入群*/
+            self.registeButton = [UIButton buttonWithType:UIButtonTypeCustom];
+            [self.registeButton setBackgroundImage:[UIImage imageNamed:@"btn- -group"] forState:UIControlStateNormal];
+            [self.registeButton setBackgroundImage:[UIImage imageNamed:@"btn-add-group-sel"] forState:UIControlStateHighlighted];
+            self.registeButton.frame = CGRectMake(9, self.rlmemberInfoCell.frame.origin.y + 76, 302, 44);
+            [self.registeButton addTarget:self action:@selector(registeFromRoom:) forControlEvents:UIControlEventTouchUpInside];
+            [footerView addSubview:self.registeButton];
+            
+        }
+        /*非本群成员不能发送消息*/
+        if (self.isOwner != 3) {
+            self.sendButton = [[UIButton alloc] init];
+            [self.sendButton setBackgroundImage:[UIImage imageNamed:@"btn-seed-message"] forState:UIControlStateNormal];
+            [self.sendButton setBackgroundImage:[UIImage imageNamed:@"btn-seed-message-sel"] forState:UIControlStateHighlighted];
+            self.sendButton.frame = CGRectMake(9, self.rlmemberInfoCell.frame.origin.y + 76, 147, 44);
+            [self.sendButton addTarget:self action:@selector(sendMessageToRoom:) forControlEvents:UIControlEventTouchUpInside];
+            [footerView addSubview:self.sendButton];
+        }
+    }else if(self.createFlag == 1)/*通过查询界面进入*/
+    {
+        /*非群成员申请加入群*/
+        if(self.isOwner == 3)
+        {
+            self.registeButton = [[UIButton alloc] init];
+            [self.registeButton setBackgroundImage:[UIImage imageNamed:@"btn-add-group"] forState:UIControlStateNormal];
+            [self.registeButton setBackgroundImage:[UIImage imageNamed:@"btn-add-group-sel"] forState:UIControlStateHighlighted];
+            self.registeButton.frame = CGRectMake(9, self.rlmemberInfoCell.frame.origin.y + 76, 302, 44);
+            [self.registeButton addTarget:self action:@selector(registeFromRoom:) forControlEvents:UIControlEventTouchUpInside];
+            [footerView addSubview:self.registeButton];
+        }
+    }
+}
+
+- (void)didReceiveMemoryWarning
+{
+    [super didReceiveMemoryWarning];
+}
+
+-(void)getMemberList:(id)sender
+{
+    RLGroupMemberListVC * listVC=[[RLGroupMemberListVC alloc]initWithNibName:nil bundle:nil];
+    listVC.xmppRoom = self.xmppRoom;
+    //listVC.memberList=roomUsersList;
+    listVC.isOwner = self.isOwner;
+    [self.navigationController pushViewController:listVC animated:YES];
+}
+
+-(void)inviteSomeBodyIntoRoom:(id)sender
+{
+    RLInviteIntoRoomVC *inviteInRoomVc = [[RLInviteIntoRoomVC alloc] init];
+    inviteInRoomVc.xmppRoom = self.xmppRoom;
+    inviteInRoomVc.groupFriendsArray = roomUsersList;
+    [self.navigationController pushViewController:inviteInRoomVc animated:YES];
+}
+
+-(void)quitFromRoom:(UIButton *)sender
+{
+    IMAlert *alert = [[IMAlert alloc] init];
+    [alert alertCancelOK:@"确定退出？" delegate:self];
+}
+
+-(void)dimissRoom:(UIButton *)sender
+{
+    IMAlert *alert = [[IMAlert alloc] init];
+    [alert alertCancelOK:@"确定解散？" delegate:self];
+}
+
+-(void)finishCreateRoom:(UIButton *)sender
+{
+    [self.navigationController popToRootViewControllerAnimated:YES];
+}
+
+-(void)sendMessageToRoom:(UIButton *)sender
+{
+    [self.navigationController popViewControllerAnimated:YES];
+}
+
+-(void)registeFromRoom:(UIButton *)sender
+{
+    //加群
+    [self.registeButton setEnabled:NO];
+    XMPPJID *myJID = self.xmppStream.myJID;
+    [self.logic joinGroupByUserJID:[myJID bare] andRoomName:[[self.xmppRoom.roomJID user] lowercaseString] success:^(id json) {
+         NSDictionary * dic=(NSDictionary *)json;
+        if (dic.count > 0) {
+            showMsg = [dic objectForKey:@"showMsg"];
+//            if ([showMsg intValue] == 0) {
+//                showMsg = @"false";
+//            }else if ([showMsg intValue] == 1)
+//            {
+//                showMsg = @"true";
+//            }
+            NSString *successMsg = [dic objectForKey:@"message"];
+            if ([showMsg isEqualToString:@"true"] && [successMsg isEqualToString:@"SUCCESS"]) {
+                [self showStringHUD:@"加群成功\n" second:2];
+                XMPPRoomManager *xmppRoomManager = [[XMPPRoomManager alloc] init];
+                [xmppRoomManager joinRoomWithJid:self.xmppRoom.roomJID andType:0];
+                [NSTimer scheduledTimerWithTimeInterval:1.0f target:self selector:@selector(registerSuccess:) userInfo:nil repeats:NO];
+                return;
+            }else
+            {
+                [[IMAlert alloc] alert:@"加群失败" delegate:self];
+                [self.registeButton setEnabled:YES];
+                return;
+            }
+        }else
+        {
+            [[IMAlert alloc] alert:@"服务器异常，稍后再试" delegate:self];
+        }
+        [self.registeButton setEnabled:YES];
+     } failure:^(NSError *err) {
+         [self failureHideHUD];
+     }];
+
+//        NSXMLElement *query = [NSXMLElement elementWithName:@"query" xmlns:@"jabber:iq:register"];
+//        NSXMLElement *iq = [NSXMLElement elementWithName:@"iq"];
+//        [iq addAttributeWithName:@"type" stringValue:@"get"];
+//        [iq addAttributeWithName:@"from" stringValue:[myJID full]];
+//        [iq addAttributeWithName:@"to" stringValue:[self.xmppRoom.roomJID bare]];
+//        [iq addAttributeWithName:@"id" stringValue:@"reg1"];
+//        [iq addChild:query];
+//        [self.xmppStream sendElement:iq];
+//    XMPPJID *roomJID = self.xmppRoom.roomJID;
+//    RLGroupMemberJoinVC *rlGroupMemberJoinVC = [[RLGroupMemberJoinVC alloc] init];
+//    rlGroupMemberJoinVC.roomJidStr = [roomJID bare];
+//    rlGroupMemberJoinVC.roomJidFullStr= [roomJID full];
+//    [self.navigationController pushViewController:rlGroupMemberJoinVC animated:YES];
+}
+
+-(void)registerSuccess:(NSTimer*)timer
+{
+    [self.navigationController popToRootViewControllerAnimated:YES];
+}
+
+#pragma mark - UIAlertViewDelegate
+- (void)alertView:(UIAlertView *)alertView clickedButtonAtIndex:(NSInteger)buttonIndex
+{
+    if (buttonIndex != 0) {
+        NSString *myJID = [[XMPPManager sharedInstance].xmppStream.myJID bare];
+        NSString *roomName = self.roomJID.user;
+        __block XMPPRoom *room = self.xmppRoom;
+
+        if (self.isOwner == 0 ) {
+            [self.xmppRoom destroyRoom];
+            [self.logic dismissGroupByUserJID:myJID andRoomName:roomName success:^(id json) {
+                [[XMPPManager sharedInstance].imMessageStorage removeRecentMessageWithBareJID:[room.roomJID bare]];
+                [[XMPPManager sharedInstance].imMessageStorage removeMessageWithBareJID:[room.roomJID bare]];
+                [self.navigationController popToRootViewControllerAnimated:YES];
+            }failure:^(NSError *err){
+                [self failureHideHUD];
+            }];
+        }else
+        {
+            [self.xmppRoom deactivate];
+            [self.logic leaveGroupByUserJID:myJID andRoomName:roomName success:^(id json) {
+                [[XMPPManager sharedInstance].imMessageStorage removeRecentMessageWithBareJID:[room.roomJID bare]];
+                [[XMPPManager sharedInstance].imMessageStorage removeMessageWithBareJID:[room.roomJID bare]];
+                [self.navigationController popToRootViewControllerAnimated:YES];
+            } failure:^(NSError *err) {
+                [self failureHideHUD];
+            }];
+        }
+    }
+}
+
+- (BOOL)xmppStream:(XMPPStream *)sender didReceiveIQ:(XMPPIQ *)iq{
+    DDLogInfo(@"%@: %@", THIS_FILE, THIS_METHOD);
+    NSString *userName = self.xmppStream.myJID.user;
+    NSString *type = [iq type];
+    NSString *elementID=[iq elementID];
+	if ([type isEqualToString:@"result"])
+	{
+        if ([elementID isEqualToString:@"reg1"]) {
+            XMPPJID *myJID = self.xmppStream.myJID;
+            
+            NSXMLElement *query =[[iq elementForName:@"query" xmlns:@"jabber:iq:register"] copy] ;
+            if ([query elementForName:@"registered"]) {//已经注册
+                [[IMAlert alloc] alert:@"您已经在群里面了!" delegate:self];
+            } else {//注册
+                NSXMLElement * x=[[query elementForName:@"x"] copy];
+                [x removeAttributeForName:@"type"];
+                [x addAttributeWithName:@"type" stringValue:@"submit"];
+                
+                NSArray* fields = [x elementsForName:@"field"];
+                for (NSXMLElement *field in fields) {
+                    NSString *var = [field attributeStringValueForName:@"var"];
+                    if ([var isEqualToString:@"muc#register_first"]) {
+                        [field removeChildAtIndex:0];
+                        [field addChild:[NSXMLElement elementWithName:@"value" stringValue:userName]];
+                    }
+                    if ([var isEqualToString:@"muc#register_last"]) {
+                        [field removeChildAtIndex:0];
+                        [field addChild:[NSXMLElement elementWithName:@"value" stringValue:userName]];
+                    }
+                    if ([var isEqualToString:@"muc#register_roomnick"]) {
+                        [field removeChildAtIndex:0];
+                        NSString *strName = [NSString stringWithFormat:@"%@/%@",userName,[myJID full]];
+                        [field addChild:[NSXMLElement elementWithName:@"value" stringValue:strName]];
+                    
+                    }
+                    //                if ([var isEqualToString:@"muc#register_url"]) {
+                    //                    [field removeChildAtIndex:0];
+                    //                    [field addChild:[NSXMLElement elementWithName:@"value" stringValue:@"http://123.com"]];
+                    //                }
+                    //                if ([var isEqualToString:@"muc#register_email"]) {
+                    //                    [field removeChildAtIndex:0];
+                    //                    [field addChild:[NSXMLElement elementWithName:@"value" stringValue:@"123@123.com"]];
+                    //                }
+                    //                if ([var isEqualToString:@"muc#register_faqentry"]) {
+                    //                    [field removeChildAtIndex:0];
+                    //                    [field addChild:[NSXMLElement elementWithName:@"value" stringValue:@"123"]];
+                    //                }
+                    
+                }
+                
+                NSXMLElement *query2 = [NSXMLElement elementWithName:@"query" xmlns:@"jabber:iq:register"];
+                [query2 addChild:x];
+                NSXMLElement *iq2 = [NSXMLElement elementWithName:@"iq" ];
+                [iq2 addAttributeWithName:@"type" stringValue:@"set"];
+                [iq2 addAttributeWithName:@"from" stringValue:[myJID full]];
+                [iq2 addAttributeWithName:@"to" stringValue:[self.roomJID bare]];
+                [iq2 addAttributeWithName:@"id" stringValue:@"reg2"];
+                [iq2 addChild:query2];
+                [self.xmppStream sendElement:iq2];
+            }
+        }else if ([elementID isEqualToString:@"reg2"]){
+            [[IMAlert alloc] alert:@"恭喜您，注册成功" delegate:self];
+            
+        }
+        
+	}else if([type isEqualToString:@"error"] && [elementID isEqualToString:@"reg1"])
+    {
+        [[IMAlert alloc] alert:@"服务器异常，稍后再试" delegate:self];
+    }
+    return NO;
+}
+
+@end

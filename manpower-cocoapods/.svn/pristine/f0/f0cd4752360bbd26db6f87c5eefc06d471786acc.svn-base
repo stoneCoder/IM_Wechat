@@ -1,0 +1,19 @@
+//
+//  RLGroup.m
+//  manpower
+//
+//  Created by WangShunzhou on 14-9-17.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import "RLGroup.h"
+
+
+@implementation RLGroup
+
+@dynamic desc;
+@dynamic naturalName;
+@dynamic subject;
+@dynamic type;
+
+@end

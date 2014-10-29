@@ -1,0 +1,120 @@
+//
+//  RLRoomLogic.m
+//  manpower
+//
+//  Created by WangShunzhou on 14-9-24.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import "RLRoomLogic.h"
+
+@implementation RLRoomLogic
+
+
++(void)createRoom:(NSString*)roomName
+      withUserJID:(NSString*)userJIDStr
+  withDescription:(NSString*)description
+      withSubject:(NSString*)subject
+  withNaturalName:(NSString*)naturalName
+         withView:(UIView*)view
+          success:(void(^)(id responseObject))success
+          failure:(void(^)(id responseObject))failure{
+    
+    NSString *type = @"createRoom";
+    
+    [RLRoomLogic operateRoom:roomName withUserJID:userJIDStr withType:type withDescription:description withSubject:subject withNaturalName:naturalName withView:view success:success failure:failure];
+}
+
++(void)updateRoom:(NSString*)roomName
+      withUserJID:(NSString*)userJIDStr
+  withDescription:(NSString*)description
+      withSubject:(NSString*)subject
+  withNaturalName:(NSString*)naturalName
+         withView:(UIView*)view
+          success:(void(^)(id responseObject))success
+          failure:(void(^)(id responseObject))failure{
+    
+    NSString *type = @"updateRoom";
+
+    [RLRoomLogic operateRoom:roomName withUserJID:userJIDStr withType:type withDescription:description withSubject:subject withNaturalName:naturalName withView:view success:success failure:failure];
+    
+}
+
++(void)operateRoom:(NSString*)roomName
+      withUserJID:(NSString*)userJIDStr
+         withType:(NSString*)type
+  withDescription:(NSString*)description
+      withSubject:(NSString*)subject
+   withNaturalName:(NSString*)naturalName
+         withView:(UIView*)view
+          success:(void(^)(id responseObject))success
+          failure:(void(^)(id responseObject))failure{
+    
+    NSDictionary *params = @{@"type" : type,
+                             @"subdomain" : @"conference",
+                             @"userJID" : userJIDStr,
+                             @"roomName" : roomName,
+                             @"description" : description,
+                             @"subject" : subject,
+                             @"naturalName" : naturalName};
+    
+    NSString *uri = @"plugins/ofroomplugin/ofroomplugin";
+    NSString *urlStr = [NSString stringWithFormat:@"%@%@",API,uri];
+    
+    [RLBaseLogic post:urlStr Parameters:params success:success failure:failure withView:view];
+    
+}
+
++(void)updatePhoto:(NSString*)filePath
+        withRoomID:(NSString*)roomID
+          withView:(UIView*)view
+           success:(void(^)(id responseObject))success
+           failure:(void(^)(id responseObject))failure{
+    
+    NSDictionary *params = @{@"ecOfmucroomRef.roomID":roomID};
+    
+    NSString *uri = @"addEcOfmucroomRef";
+    NSString *urlStr = [NSString stringWithFormat:@"%@%@",SERVICE_API,uri];
+
+    [RLBaseLogic uploadFile:filePath withFilename:@"uploadImage" withURL:urlStr Parameters:params success:success failure:failure withView:view];
+}
+
+
++(void)getRoomInfo:(NSString *)roomName withUserJIDStr:(NSString *)userJID success:(void (^)(id json))success failure:(void (^)( id json))failure connectionError:(void(^)(NSError *error))connectionError{
+    
+    NSDictionary *params = @{@"roomName":roomName
+                             ,@"userJID":userJID
+                             ,@"subdomain":@"conference"
+                             ,@"type":@"getRoomInfo"};
+    
+    NSString *uri = @"plugins/ofroomplugin/ofroomplugin";
+    NSString *urlStr = [NSString stringWithFormat:@"%@%@",API,uri];
+    
+    [RLBaseLogic post:urlStr Parameters:params success:success failure:failure connectionError:connectionError withView:nil];
+}
+
++(void)changeNickname:(NSString*)nickname withUserJIDStr:(NSString*)userJIDStr withRoomName:(NSString*)roomName{
+    
+    NSDictionary *params = @{@"ecOfmucnicknameRef.roomName" : roomName
+                             ,@"ecOfmucnicknameRef.jid" : userJIDStr
+                             ,@"ecOfmucnicknameRef.nickname" : nickname};
+    
+    NSString *uri = @"addEcOfmucnicknameRef";
+    NSString *urlStr = [NSString stringWithFormat:@"%@%@",SERVICE_API,uri];
+    
+    [RLBaseLogic post:urlStr Parameters:params success:NULL failure:NULL withView:nil];
+}
+
++(void)getRoomsWithKeyword:(NSString*)keyword withUserJIDStr:(NSString*)userJIDStr success:(void (^)(id json))success failure:(void (^)( id json))failure connectionError:(void(^)(NSError *error))connectionError{
+    
+    NSDictionary *params = @{@"type" : @"getRoomInfosByLike",
+                             @"subdomain" : @"conference",
+                             @"roomName" : keyword,
+                             @"userJID" : userJIDStr};
+    
+    NSString *uri = @"plugins/ofroomplugin/ofroomplugin";
+    NSString *urlStr = [NSString stringWithFormat:@"%@%@",API,uri];
+    
+    [RLBaseLogic post:urlStr Parameters:params success:NULL failure:NULL withView:nil];
+}
+@end

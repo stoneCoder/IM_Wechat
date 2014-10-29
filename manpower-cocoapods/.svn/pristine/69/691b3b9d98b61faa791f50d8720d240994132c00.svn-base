@@ -1,0 +1,765 @@
+//
+//  ZMMessage.m
+//  manpower
+//
+//  Created by WangShunzhou on 14-8-22.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import "ZMMessage.h"
+#import "AFNetworking.h"
+#import "Define.h"
+#import "XMPPManager.h"
+#import "IMMessageHelper.h"
+#import "IMRecorder.h"
+#import "FaceBoard.h"
+#import "TextMessageView.h"
+#import "AppDelegate.h"
+#import <objc/runtime.h>
+#import "AFURLRequestSerialization.h"
+#import "AFHTTPRequestOperationManager+Progress.h"
+#import "RLMyInfo.h"
+#import "RLRoom.h"
+
+@interface ZMMessage (){
+    NSFetchedResultsController *fetchedResultsController;
+}
+@end
+
+@implementation ZMMessage
+
+@dynamic desc;
+@dynamic fileName;
+@dynamic friendBareJID;
+@dynamic fromBareJID;
+@dynamic fromJID;
+@dynamic localFilePath;
+@dynamic msg;
+@dynamic msgType;
+@dynamic myBareJID;
+@dynamic nickname;
+@dynamic outgoing;
+@dynamic remoteTimestamp;
+@dynamic roomJID;
+@dynamic sendTime;
+@dynamic status;
+@dynamic timestamp;
+@dynamic toBareJID;
+@dynamic toConversationJID;
+@dynamic toJID;
+@dynamic type;
+@dynamic unread;
+@dynamic uuid;
+@dynamic avatar;
+
+@synthesize delegate;
+
+#if MSG_ENABLE_ENCRYPT
+static void setPropertyIMP(id self, SEL cmd, id value){
+    NSString *cmdStr = NSStringFromSelector(cmd);
+    NSString *key = [cmdStr substringWithRange:NSMakeRange(3, [cmdStr length]-4)];
+    key = [NSString stringWithFormat:@"%@%@",[key substringToIndex:1].lowercaseString,[key substringFromIndex:1]];
+    [self willChangeValueForKey:key];
+    [self setPrimitiveValue:[IMMessageHelper encrypt:value] forKey:key];
+    [self didChangeValueForKey:key];
+}
+
+-(void)setupCryptProperties{
+    unsigned int propertyCount = 0;
+    objc_property_t *propertyList = class_copyPropertyList([self class], &propertyCount);
+    
+    for (int16_t i = 0; i < propertyCount; i++) {
+        objc_property_t *thisProperty = propertyList + i;
+        const char* propertyName = property_getName(*thisProperty);
+        const char* propertyAttr = property_getAttributes(*thisProperty);
+        DDLogVerbose(@"Has a property: '%s'\nAttrs: '%s'\n", propertyName, propertyAttr);
+        
+        NSError *err = nil;
+        NSRegularExpression *regExp = [[NSRegularExpression alloc] initWithPattern:@"@\".+\"" options:NSRegularExpressionAnchorsMatchLines error:&err];
+        if (err) {
+            NSLog(@"%@",err);
+        }
+        NSString *propertyString = [NSString stringWithUTF8String:propertyAttr];
+        //        NSArray* match = [regExp matchesInString:propertyString options:NSMatchingReportCompletion range:NSMakeRange(0, [propertyString length])];
+        NSRange range = [regExp rangeOfFirstMatchInString:propertyString options:NSMatchingReportCompletion range:NSMakeRange(0, [propertyString length])];
+        if (range.length) {
+            range = NSMakeRange(range.location+2, range.length-3);
+            NSString *propertyType = [propertyString substringWithRange:range];
+            NSLog(@"Property Type: %@",propertyType);
+            
+            if ([propertyType isEqualToString:@"NSString"]) {
+                NSString *propertyNameStr = [NSString stringWithUTF8String:propertyName];
+                NSString *setSelectorName = [NSString stringWithFormat:@"set%@:",[propertyNameStr capitalizedString]];
+                SEL setSelector = NSSelectorFromString(setSelectorName);
+                class_addMethod([self class], setSelector, (IMP)setPropertyIMP, "v@:@");
+            }
+        }
+    }
+}
+
+-(void)setStringProperty:(NSString*)value withSelector:(SEL)selector{
+    NSDate *beforeDate = [NSDate date];
+    NSString *cmdStr = NSStringFromSelector(selector);
+    NSString *key = [cmdStr substringWithRange:NSMakeRange(3, [cmdStr length]-4)];
+    key = [NSString stringWithFormat:@"%@%@",[key substringToIndex:1].lowercaseString,[key substringFromIndex:1]];
+    [self willChangeValueForKey:key];
+    [self setPrimitiveValue:[IMMessageHelper encrypt:value] forKey:key];
+    [self didChangeValueForKey:key];
+    NSDate *afterDate = [NSDate date];
+    
+    DDLogVerbose(@"====================Encrypt cost: %f",[afterDate timeIntervalSince1970] - [beforeDate timeIntervalSince1970]);
+}
+
+-(NSString*)stringProperty:(SEL)selector{
+//    NSDate *beforeDate = [NSDate date];
+    
+    NSString *key = NSStringFromSelector(selector);
+    [self willAccessValueForKey:key];
+    NSString *retString = [IMMessageHelper decrypt:[self primitiveValueForKey:key]];
+    //    NSString *retString = [self primitiveValueForKey:key];
+    [self didAccessValueForKey:key];
+    
+//    NSDate *afterDate = [NSDate date];
+    
+//    DDLogVerbose(@"====================Decrypt cost: %f",[afterDate timeIntervalSince1970] - [beforeDate timeIntervalSince1970]);
+    return retString;
+}
+
+-(void)setMsg:(NSString *)value{
+    [self setStringProperty:value withSelector:_cmd];
+}
+
+-(NSString*)msg{
+    return [self stringProperty:_cmd];
+}
+
+-(void)setLocalFilePath:(NSString *)value{
+    [self setStringProperty:value withSelector:_cmd];
+}
+
+-(NSString*)localFilePath{
+    return [self stringProperty:_cmd];
+}
+
+-(void)setFileName:(NSString *)value{
+    [self setStringProperty:value withSelector:_cmd];
+}
+
+-(NSString*)fileName{
+    return [self stringProperty:_cmd];
+}
+
+-(void)setNickname:(NSString *)value{
+    [self setStringProperty:value withSelector:_cmd];
+}
+
+-(NSString*)nickname{
+    return [self stringProperty:_cmd];
+}
+
+#endif
+
+#pragma mark - Public Methods
+/**
+ *  发消息（音频，图片，文本）
+ *
+ *  @param msgType    NSInteger 0:文本；1:图片；2:音频
+ *  @param withGroupchatType    NSString 单人消息:chat ; 群消息:groupchat
+ *  @param fromJID    XMPPJID 发送人
+ *  @param toJID    XMPPJID 接收人
+ *  @param attachment id 附件类型为id, 当发图片时附件为UIImage。当发音频时，附件为音频文件的路径(NSString)。
+ */
+-(void)sendMessage:(NSInteger)msgType withGroupchatType:(NSString*)type fromJID:(XMPPJID*)fromJID toJID:(XMPPJID*)toJID withAttachment:(id)attachment{
+    NSString *fromJIDStr = fromJID.full;
+    NSString *toJIDStr = toJID.full;
+    NSDictionary *parameters = @{URL_FROM_JID_FIELD : fromJID,
+                                 URL_TO_JID_FIELD : toJID,
+                                 URL_MSG_TYPE_FIELD : @(msgType)};
+    
+    self.myBareJID = fromJID.bare;
+    self.outgoing = YES;
+    self.status = MSG_STATUS_PENDING;
+    self.msgType = msgType;
+    self.type = type;
+    self.toJID = toJIDStr;
+    self.toBareJID = toJID.bare;
+    self.uuid = [[XMPPManager sharedInstance].xmppStream generateUUID];
+    self.fromBareJID = fromJID.bare;
+    self.friendBareJID = toJID.bare;
+    self.avatar = [RLMyInfo sharedRLMyInfo].photo;
+    
+    if ([self isChat]) {
+        self.fromJID = fromJIDStr;
+    }else if ([self isGroupChat]){
+        RLRoom *room = [RLRoom MR_findFirstByAttribute:@"roomName" withValue:toJID.user];
+        NSString *nickname = room.nickname ? room.nickname : [RLMyInfo sharedRLMyInfo].name;
+        self.fromJID = [NSString stringWithFormat:@"%@/%@", fromJID.user, fromJIDStr];
+        self.nickname = nickname;   //群昵称
+    }else{
+        DDLogError(@"消息类型必须为chat或groupchat, 当前self.type值为: %@",self.type);
+        [self.managedObjectContext deleteObject:self];
+        return;
+    }
+    
+//    NSDateFormatter *dateFormatter = [[NSDateFormatter alloc] init];
+//    [dateFormatter setDateFormat:MSG_SEND_TIME_FORMATTER];
+    NSDate *date = [NSDate date];
+    self.timestamp = date;
+    [[XMPPManager sharedInstance].xmppStream addDelegate:self delegateQueue:dispatch_get_main_queue()];
+    
+    switch (msgType) {
+        case MSG_TYPE_IMAGE:
+            [self sendImage:attachment withParameters:parameters];
+            break;
+            
+        case MSG_TYPE_AUDIO:
+            [self sendVoice:attachment withParameters:parameters];
+            break;
+            
+        case MSG_TYPE_TEXT:
+            [self sendText:attachment];
+            break;
+    }
+    
+}
+// =======================================================================
+
+// 发送不同格式的信息
+// =======================================================================
+/**
+ *  发图片
+ *
+ *  @param image      UIImage  image为空的时候，证明本地已经储存了图片，重发图片。
+ *  @param parameters NSDictionary
+ *
+ *  @return BOOL
+ *  @abstract 发送图片之前先将图片统一转成JPG格式并按30%(按微信压缩图片的测试结果估算而来)的标准来压缩图片。
+ */
+-(void)sendImage:(UIImage*)image withParameters:(NSDictionary*)parameters{
+    if (image) {
+        NSData *imgData = UIImagePNGRepresentation(image);
+        NSString *imgType = @"image/jpeg";
+        if (imgData) {
+            // 如果是png，转jpg
+            image = [[UIImage alloc] initWithData:imgData];
+        }
+        imgData = UIImageJPEGRepresentation(image, 0.3);
+        //        NSLog(@"%d",[imgData length]);
+        //        imgData = UIImageJPEGRepresentation(image, 0.2);
+        //        NSLog(@"%d",[imgData length]);
+        //        imgData = UIImageJPEGRepresentation(image, 0.3);
+        //        NSLog(@"%d",[imgData length]);
+        //        imgData = UIImageJPEGRepresentation(image, 0.4);
+        //        NSLog(@"%d",[imgData length]);
+        //        imgData = UIImageJPEGRepresentation(image, 0.5);
+        //        NSLog(@"%d",[imgData length]);
+        //        imgData = UIImageJPEGRepresentation(image, 0.6);
+        //        NSLog(@"%d",[imgData length]);
+        //        imgData = UIImageJPEGRepresentation(image, 0.7);
+        //        NSLog(@"%d",[imgData length]);
+        //        imgData = UIImageJPEGRepresentation(image, 0.8);
+        //        NSLog(@"%d",[imgData length]);
+        
+        // 如果压缩后的大于1M，则再按80%压缩一次。
+        // 目前基本上不可能发生，仅做预防处理。
+        if ([imgData length]>1024*1024) {
+            imgData = UIImageJPEGRepresentation(image, 0.8);
+        }
+        
+        NSString *imgExt = [[imgType componentsSeparatedByString:@"/"] lastObject];
+        //        imgExt = @"jpg";
+        NSString *imgTmpFileName = [NSString stringWithFormat:@"%d%d",(int)[[NSDate date] timeIntervalSince1970],(arc4random()%10000)];
+        NSString *imgTmpFilePath = [NSString stringWithFormat:@"%@/%@.%@",TMP_DIR_PATH,imgTmpFileName,imgExt];
+        NSFileManager *fileManager = [NSFileManager defaultManager];
+        while (true) {
+            if (![fileManager fileExistsAtPath:imgTmpFilePath]) {
+                break;
+            }
+            DDLogError(@"file exsits: %d",[imgData length]);
+            imgTmpFileName = [NSString stringWithFormat:@"%d%d",(int)[[NSDate date] timeIntervalSince1970],(arc4random()%10000)];
+            imgTmpFilePath = [NSString stringWithFormat:@"%@/%@.%@",TMP_DIR_PATH,imgTmpFileName,imgExt];
+        };
+        self.localFilePath = imgTmpFilePath;
+//        DDLogError(@"%d",[imgData length]);
+        [imgData writeToFile:self.localFilePath atomically:YES];
+        [self save];
+    }
+    
+    // 如果没有网络 标记为发送失败
+    if (!kReachability) {
+        self.status = MSG_STATUS_FAILURE;
+        [self save];
+        return;
+    }
+    
+    NSURL *imgUrl = [NSURL fileURLWithPath:self.localFilePath];
+    
+    NSString *urlStr = URL_MSG_ATTACHMENT_UPLOAD;
+    
+    void (^formDataBlock)(id <AFMultipartFormData> formData) = ^(id<AFMultipartFormData> formData){
+//        DDLogError(@"%@",imgUrl);
+        [formData appendPartWithFileURL:imgUrl name:@"uploadImage" error:nil];
+    };
+    
+    AFHTTPRequestOperationManager *manager = [AFHTTPRequestOperationManager manager];
+    [manager POST:urlStr parameters:parameters progress:^(NSUInteger bytesWritten, long long totalBytesWritten, long long totalBytesExpectedToWrite){
+        NSString *percentage = [NSString stringWithFormat:@"%d%%",(NSInteger)(((CGFloat)totalBytesWritten / totalBytesExpectedToWrite ) * 100)];
+        [self.delegate iMMessage:self uploadingImageWithPercentage:percentage];
+        DDLogVerbose(@"%@",percentage);
+    }constructingBodyWithBlock:formDataBlock success:^(AFHTTPRequestOperation *operation, id responseObject){
+        DDLogVerbose(@"=================Upload image SUCCESS.===================");
+        DDLogVerbose(@"%@",responseObject);
+        
+        NSDictionary *responseDic = (NSDictionary*)responseObject;
+        NSString *imgUrlStr = [[responseDic objectForKey:@"ecContentInfor"] objectForKey:URL_FILE_FIELD];
+        if (imgUrlStr == (NSString*)[NSNull null]) {
+            DDLogError(@"=================Upload image failed.===================");
+            //  标记为发送失败
+            self.status = MSG_STATUS_FAILURE;
+            [self save];
+            return;
+        }
+        self.msg = imgUrlStr;
+        NSString *imgName = [[imgUrlStr componentsSeparatedByString:@"/"] lastObject];
+        self.fileName = imgName;
+        [self save];
+        
+        [self sendXMPPMessage:imgUrlStr withMsgType:MSG_TYPE_IMAGE];
+        
+    } failure:^(AFHTTPRequestOperation *operation, NSError *error){
+        DDLogError(@"=================Upload image failed.===================");
+        DDLogError(@"%@",error);
+        //  标记为发送失败
+        self.status = MSG_STATUS_FAILURE;
+        [self save];
+    }];
+}
+
+/**
+ *  发音频
+ *
+ *  @param filePath   NSString amr文件路径。
+ *  @param parameters NSDictionary
+ */
+-(void)sendVoice:(NSString*)filePath withParameters:(NSDictionary*)parameters{
+    DDLogVerbose(@"========Voice file path:==========\n%@",filePath);
+    if (filePath) {
+        self.localFilePath = filePath;
+        NSURL *fileUrl = [NSURL fileURLWithPath:filePath];
+        AVAudioPlayer *player = [[AVAudioPlayer alloc] initWithContentsOfURL:fileUrl error:nil];
+        NSString *duration = [NSString stringWithFormat:@"%ld", lround(player.duration)];
+        self.desc = duration;
+        [self save];
+    }
+    // 如果没有网络 标记为发送失败
+    if (!kReachability) {
+        self.status = MSG_STATUS_FAILURE;
+        [self save];
+        return;
+    }
+    
+    NSString *urlStr = URL_MSG_ATTACHMENT_UPLOAD;
+    AFHTTPRequestOperationManager *manager = [AFHTTPRequestOperationManager manager];
+    [manager POST:urlStr parameters:parameters constructingBodyWithBlock:^(id<AFMultipartFormData> formData){
+        [formData appendPartWithFileURL:[NSURL fileURLWithPath:self.localFilePath] name:URL_UPLOAD_FIELD error:nil];
+    } success:^(AFHTTPRequestOperation *operation, id responseObject){
+        NSDictionary *responseDic = (NSDictionary*)responseObject;
+        NSString *fileUrlStr = [[responseDic objectForKey:URL_RESULT_FIELD] objectForKey:URL_FILE_FIELD];
+        if (fileUrlStr == (NSString*)[NSNull null]) {
+            DDLogError(@"=================Upload voice failed.===================");
+            //  Todo
+            //  加入消息重发逻辑
+            self.status = MSG_STATUS_FAILURE;
+            [self save];
+            return;
+        }
+        self.msg = fileUrlStr;
+        NSString *preFileName = [[[[fileUrlStr componentsSeparatedByString:@"/"] lastObject] componentsSeparatedByString:@"."] objectAtIndex:0];
+        self.fileName = preFileName;
+        [self sendXMPPMessage:fileUrlStr withMsgType:MSG_TYPE_AUDIO withDesc:self.desc];
+        [self save];
+        
+    } failure:^(AFHTTPRequestOperation *operation, NSError *error){
+        DDLogError(@"%@",error);
+        self.status = MSG_STATUS_FAILURE;
+        [self save];
+    }];
+    
+}
+
+/**
+ *  发文本
+ *
+ *  @param text NSString
+ */
+-(void)sendText:(NSString*)text{
+    if (text.length) {
+        self.msg = text;
+        self.status = MSG_STATUS_PENDING;
+        // 如果没有网络 标记为发送失败
+        if (!kReachability) {
+            self.status = MSG_STATUS_FAILURE;
+            [self save];
+            return;
+        }
+        [self save];
+        
+#if MSG_SENT_RECIEPT
+        // 如果开始消息回执，则不特意显示动画效果
+        [self sendXMPPMessage:text withMsgType:MSG_TYPE_TEXT];
+#else
+        // 特地做个延时效果，让用户感觉到消息正在发送中。延时1秒。
+        dispatch_time_t popTime = dispatch_time(DISPATCH_TIME_NOW, 0.5 * NSEC_PER_SEC);
+        dispatch_after(popTime, dispatch_get_main_queue(), ^(void){
+            [self sendXMPPMessage:text withMsgType:MSG_TYPE_TEXT];
+        });
+#endif
+        
+    }
+}
+
+
+
+/**
+ *  将要发送的信息，拼装成XMPPMessage，然后发送。
+ *
+ *  @param bodyDic NSDictionary
+ */
+-(void)sendXMPPMessage:(NSDictionary*)bodyDic{
+    XMPPJID *toJID = [XMPPJID jidWithString:self.toJID];
+    XMPPManager *xmpp = [XMPPManager sharedInstance];
+    NSData *bodyData = [NSJSONSerialization  dataWithJSONObject:bodyDic options:NSJSONWritingPrettyPrinted error:nil];
+    XMPPMessage *message = [XMPPMessage messageWithType:self.type to:toJID elementID:self.uuid];
+    [message addBody:[[NSString alloc] initWithData:bodyData encoding:NSUTF8StringEncoding]];
+    [message addAttributeWithName:@"from" stringValue:self.fromBareJID];
+    [xmpp.xmppStream sendElement:message];
+}
+
+
+-(CGFloat)getRowHeight:(BOOL)showTimeLabel{
+    CGFloat height = 0;
+    switch (self.msgType) {
+        case MSG_TYPE_IMAGE: //Image
+            height = [self getRowHeightForImage];
+            break;
+        case MSG_TYPE_AUDIO: //Audio
+            height = MSG_ROW_HEIGHT_DEFAULT;
+            break;
+        case MSG_TYPE_LOCATION: //Location
+            break;
+        case MSG_TYPE_TEXT: //Text
+            height = [self getRowHeightForText];
+            break;
+    }
+    if ([self isGroupChat]) {
+        height += MSG_NICKNAME_LABEL_HEIGHT;
+    }
+    
+    if (showTimeLabel) {
+        height += MSG_TIME_LABEL_HEIGHT;
+    }
+    return height;
+}
+
+-(BOOL)isChat{
+    return [self.type isEqualToString:@"chat"];
+}
+
+-(BOOL)isGroupChat{
+    return [self.type isEqualToString:@"groupchat"];
+}
+
+
+#pragma mark - Public Methods. Parse text/emotion
+/**
+ * 解析输入的文本
+ *
+ * 根据文本信息分析出哪些是表情，哪些是文字
+ */
+-(void)getMessage:(NSString*)message withArray:(NSMutableArray*)array {
+    NSRange range=[message rangeOfString: FACE_NAME_BEGIN];
+    NSRange range1=[message rangeOfString: FACE_NAME_END];
+    //判断当前字符串是否还有表情的标志。
+    if (range.length>0 && range1.length>0) {
+        if (range.location > 0) {
+            [array addObject:[message substringToIndex:range.location]];
+            [array addObject:[message substringWithRange:NSMakeRange(range.location, range1.location+1-range.location)]];
+            NSString *str=[message substringFromIndex:range1.location+1];
+            [self getMessage:str withArray:array];
+        }else {
+            NSString *nextstr=[message substringWithRange:NSMakeRange(range.location, range1.location+1-range.location)];
+            //排除文字是“”的
+            if (![nextstr isEqualToString:@""]) {
+                [array addObject:nextstr];
+                NSString *str=[message substringFromIndex:range1.location+1];
+                [self getMessage:str withArray:array];
+            }else {
+                return;
+            }
+        }
+        
+    } else if (message.length>0) {
+        [array addObject:message];
+    }
+}
+/**
+ *  获取文本尺寸
+ */
+- (CGSize)getContentSize {
+    @synchronized ( self ) {
+        CGFloat upX;
+        CGFloat upY;
+        //        CGFloat lastPlusSize;
+        CGFloat viewWidth;
+        CGFloat viewHeight;
+        BOOL isLineReturn;
+        
+        NSMutableArray *msgArr = [NSMutableArray array];    //信息数组
+        
+        [self getMessage:self.msg withArray:msgArr];
+        
+        NSDictionary *faceMap = [[NSUserDefaults standardUserDefaults] objectForKey:@"FaceMap"];
+        
+        UIFont *font = [UIFont systemFontOfSize:MSG_FONT_SIZE];
+        
+        isLineReturn = NO;
+        
+        upX = VIEW_LEFT;
+        upY = VIEW_TOP;
+        
+        for (int index = 0; index < [msgArr count]; index++) {
+            
+            NSString *str = [msgArr objectAtIndex:index];
+            if ( [str hasPrefix:FACE_NAME_BEGIN] && [str hasSuffix:FACE_NAME_END] ) {
+                
+                NSArray *imageNames = [faceMap allKeysForObject:str];
+                NSString *imageName = nil;
+                NSString *imagePath = nil;
+                
+                if ( imageNames.count > 0 ) {
+                    imageName = [imageNames objectAtIndex:0];
+                    imagePath = [[NSBundle mainBundle] pathForResource:imageName ofType:@"png"];
+                }
+                
+                if ( imagePath ) {
+                    if ( upX > ( VIEW_WIDTH_MAX - KFacialSizeWidth ) ) {
+                        isLineReturn = YES;
+                        upX = VIEW_LEFT;
+                        upY += VIEW_LINE_HEIGHT;
+                    }
+                    upX += KFacialSizeWidth;
+                    //                    lastPlusSize = KFacialSizeWidth;
+                }
+                else {
+                    for ( int index = 0; index < str.length; index++) {
+                        NSString *character = [str substringWithRange:NSMakeRange( index, 1 )];
+                        CGSize size = [character sizeWithFont:font
+                                            constrainedToSize:CGSizeMake(VIEW_WIDTH_MAX, VIEW_LINE_HEIGHT)];
+                        
+                        if ( upX > ( VIEW_WIDTH_MAX - size.width ) ) {
+                            isLineReturn = YES;
+                            upX = VIEW_LEFT;
+                            upY += VIEW_LINE_HEIGHT;
+                        }
+                        
+                        upX += size.width;
+                        //                        lastPlusSize = size.width;
+                    }
+                }
+            }
+            else {
+                for ( int index = 0; index < str.length; index++) {
+                    NSString *character = [str substringWithRange:NSMakeRange( index, 1 )];
+                    CGSize size;
+                    if([character isEqualToString:[@"😊" substringWithRange:NSMakeRange(0, 1 )]])
+                    {
+                        character = [str substringWithRange:NSMakeRange(index, 2 )];
+                        index++;
+                        
+                        size = CGSizeMake(22, 22);
+                    }else{
+                        size = [character sizeWithFont:font constrainedToSize:CGSizeMake(VIEW_WIDTH_MAX, VIEW_LINE_HEIGHT)];
+                    }
+                    if ( upX > ( VIEW_WIDTH_MAX - size.width) ) {
+                        isLineReturn = YES;
+                        
+                        upX = VIEW_LEFT;
+                        upY += VIEW_LINE_HEIGHT;
+                    }
+                    
+                    upX += size.width;
+                    //                    lastPlusSize = size.width;
+                }
+            }
+        }
+        
+        if ( isLineReturn ) {
+            viewWidth = VIEW_WIDTH_MAX + VIEW_LEFT * 2;
+        }
+        else {
+            viewWidth = upX + VIEW_LEFT;
+        }
+        
+        viewHeight = upY + VIEW_LINE_HEIGHT + VIEW_TOP;
+        
+        return CGSizeMake( viewWidth, viewHeight );
+    }
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////////
+#pragma mark - Private Methods
+//////////////////////////////////////////////////////////////////////////////////////////////////
+
+/**
+ *  获得图片消息的CELL高度
+ *
+ *  @return CGFloat
+ */
+-(CGFloat)getRowHeightForImage{
+    CGFloat height = MSG_CELL_TOP_PADDING * 2 + MSG_IMAGE_MARGIN_V * 2;
+    if (self.localFilePath.length) {
+        UIImage *img = [UIImage imageWithContentsOfFile:self.localFilePath];
+        if (img.size.width > MSG_IMAGE_DEFAULT_WIDTH) {
+            CGFloat imgHeight = (MSG_IMAGE_DEFAULT_WIDTH / img.size.width) * img.size.height;
+            height += imgHeight > MSG_IMAGE_DEFAULT_HEIGHT ? MSG_IMAGE_DEFAULT_HEIGHT : imgHeight;
+        }else{
+            height += img.size.height;
+        }
+    }else{
+        height += MSG_IMAGE_LOADING_HEIGHT;
+    }
+    return height;
+}
+/*
+ -(CGFloat)getRowHeightForText{
+ CGFloat height = MSG_CELL_TOP_PADDING * 2 + MSG_TEXT_MARGIN_V * 2;
+ CGFloat width = MSG_CONTENT_MAX_WIDTH - MSG_TEXT_MARGIN_H * 2;
+ if (self.outgoing) {
+ width -= MSG_BUBBLE_LENGTH;
+ }else{
+ width -= MSG_TEXT_MARGIN_H;
+ }
+ UILabel *label= [[UILabel alloc] initWithFrame:CGRectMake(0, 0, width, 0)];
+ label.font = [UIFont systemFontOfSize:MSG_FONT_SIZE];
+ label.numberOfLines = 0;
+ label.lineBreakMode = NSLineBreakByWordWrapping;
+ label.text = self.msg;
+ [label sizeToFit];
+ height += label.frame.size.height;
+ height = height > MSG_ROW_HEIGHT_DEFAULT ? height : MSG_ROW_HEIGHT_DEFAULT;
+ return height;
+ }*/
+
+/**
+ *  获得表情、文字混编消息的CELL高度
+ *
+ *  @return CGFloat
+ */
+-(CGFloat)getRowHeightForText{
+    CGFloat height = MSG_CELL_TOP_PADDING * 2 + MSG_TEXT_MARGIN_V * 2;
+    CGSize size = [self getContentSize];
+    
+    height += size.height;
+    height = height > MSG_ROW_HEIGHT_DEFAULT ? height : MSG_ROW_HEIGHT_DEFAULT;
+    
+    return height;
+}
+
+/**
+ *  组装XMPPMessage需要的元素，并发送。
+ *
+ *  @param body    NSString  消息内容：文字或文件的URL
+ *  @param msgType NSInteger 消息类型
+ *  @param desc    NSString  描述：音频时长
+ */
+-(void)sendXMPPMessage:(NSString*)msg withMsgType:(NSInteger)msgType withDesc:(NSString*)desc{
+    NSDateFormatter *dateFormatter = [[NSDateFormatter alloc] init];
+    [dateFormatter setDateFormat:MSG_SEND_TIME_FORMATTER];
+    NSDate *date = [NSDate date];
+    self.sendTime = date;
+    if (desc == nil) {
+        desc = @"";
+    }
+    NSDictionary *bodyDic = @{MSG_ARG_TYPE : @(msgType),
+                              MSG_ARG_BODY : msg,
+                              MSG_ARG_TIME : [dateFormatter stringFromDate:date],
+                              MSG_ARG_DESC : desc,
+                              MSG_ARG_AVATAR : self.avatar  // 头像URL
+                              };
+    [self sendXMPPMessage:bodyDic];
+}
+
+-(void)sendXMPPMessage:(NSString*)msg withMsgType:(NSInteger)msgType{
+    [self sendXMPPMessage:msg withMsgType:msgType withDesc:@""];
+}
+
+-(BOOL)save{
+    NSManagedObjectContext *moc =[self managedObjectContext];
+    NSError *err = nil;
+    if (![moc save:&err]) {
+        DDLogError(@"%@",err);
+        [moc rollback];
+        return NO;
+    }
+    return YES;
+}
+
+/**
+ *  消息回执
+ */
+-(void)afterMessageSent{
+    NSString *toPath = nil;
+    if (![self.fileName length] && (self.msgType == MSG_TYPE_IMAGE || self.msgType == MSG_TYPE_AUDIO)) {
+        return;
+    }
+    switch (self.msgType) {
+        case MSG_TYPE_IMAGE:
+            toPath = [IMAGE_DIR_PATH stringByAppendingPathComponent:self.fileName];
+            break;
+        case MSG_TYPE_AUDIO:
+            toPath = [VOICE_DIR_PATH stringByAppendingPathComponent:self.fileName];
+            break;
+        case MSG_TYPE_TEXT:
+            self.status = MSG_STATUS_SUCCESS;
+            break;
+    }
+    
+    if (toPath) {
+        if ([IMMessageHelper moveFile:self.localFilePath to:toPath]) {
+            self.status = MSG_STATUS_SUCCESS;
+            self.localFilePath = toPath;
+        };
+    }
+    [self save];
+    
+}
+
+#pragma mark - XMPPMessage Mutiple Delegate
+- (void)xmppStream:(XMPPStream *)sender didReceiveMessage:(XMPPMessage *)message{
+    DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+}
+
+- (void)xmppStream:(XMPPStream *)sender didFailToSendMessage:(XMPPMessage *)message error:(NSError *)error{
+    DDLogError(@"=======================================\n%@",error);
+    self.status = MSG_STATUS_FAILURE;
+    [self save];
+    [[XMPPManager sharedInstance].xmppStream removeDelegate:self delegateQueue:dispatch_get_main_queue()];
+}
+
+
+- (void)xmppStream:(XMPPStream *)sender didSendMessage:(XMPPMessage *)message{
+    DDLogVerbose(@"%@: %@", THIS_FILE, THIS_METHOD);
+    if ([self.uuid isEqualToString:[[message attributeForName:@"id"] stringValue]]) {
+        [[XMPPManager sharedInstance].xmppStream removeDelegate:self delegateQueue:dispatch_get_main_queue()];
+    }else{
+        return;
+    }
+#if !MSG_SENT_RECIEPT
+    [self afterMessageSent];
+#endif
+    
+}
+
+
+@end
+

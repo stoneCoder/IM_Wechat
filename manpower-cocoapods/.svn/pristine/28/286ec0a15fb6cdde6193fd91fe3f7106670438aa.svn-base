@@ -1,0 +1,176 @@
+//
+//  RLGroupMemberInfoVC.m
+//  manpower
+//
+//  Created by hanjin on 14-6-11.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import "RLGroupMemberInfoVC.h"
+
+@interface RLGroupMemberInfoVC ()
+
+@end
+
+@implementation RLGroupMemberInfoVC
+
+- (id)initWithNibName:(NSString *)nibNameOrNil bundle:(NSBundle *)nibBundleOrNil
+{
+    self = [super initWithNibName:nibNameOrNil bundle:nibBundleOrNil];
+    if (self) {
+        // Custom initialization
+        [self makeNaviLeftButtonVisible:YES];
+        self.xmpp = [XMPPManager sharedInstance];
+    }
+    return self;
+}
+
+- (void)viewDidLoad
+{
+    [super viewDidLoad];
+    // Do any additional setup after loading the view from its nib.
+    [self setTitleText:@"群成员资料"];
+   
+    GroupInfoHeadView * headerView=[[GroupInfoHeadView alloc]initWithFrame:CGRectMake(0, 0, self.view.frame.size.width, 180)];
+    [headerView loadViewWithName:self.memberVO.nickName Subject:self.memberVO.jid];
+    
+    
+    NSData *photoData = [[[XMPPManager sharedInstance] xmppvCardAvatarModule] photoDataForJID:[XMPPJID jidWithString:self.memberVO.jid]];
+    if (photoData != nil)
+        [headerView.picImgView setImage:[UIImage imageWithData:photoData]];
+    else
+        [headerView.picImgView setImage:[UIImage imageNamed:@"defaultPerson"]];
+    [self.view addSubview:headerView];
+    
+    self.groupNickNameCell = [[RLInfoCell alloc] initWithFrame:CGRectMake(0, 180, self.view.frame.size.width, 50)];
+    [self.groupNickNameCell updateBackImge:0];
+    self.groupNickNameCell.titleLabel.text = @"群昵称";
+    self.groupNickNameCell.infoLabel.text = self.memberVO.jid;
+    [self.view addSubview:self.groupNickNameCell];
+    
+    self.groupRoleCell = [[RLInfoCell alloc] initWithFrame:CGRectMake(0, self.groupNickNameCell.frame.origin.y + 50, self.view.frame.size.width, 50)];
+    [self.groupRoleCell updateBackImge:0];
+    self.groupRoleCell.titleLabel.text = @"群权限";
+    if ([self.memberVO.affiliation isEqualToString:@"20"]) {
+        self.groupRoleCell.infoLabel.text = @"管理员";
+    }else if([self.memberVO.affiliation isEqualToString:@"10"])
+    {
+        self.groupRoleCell.infoLabel.text = @"拥有者";
+    }else
+    {
+        self.groupRoleCell.infoLabel.text = @"成员";
+    }
+    [self.view addSubview:self.groupRoleCell];
+   
+    self.logic=[RLGroupLogic sharedRLGroupLogic];
+    [self changeButtonFunction:self.memberVO.affiliation];
+}
+
+-(BOOL)checkFriends:(NSString *)strJID;
+{
+    XMPPJID *jid = [XMPPJID jidWithString:strJID];
+    
+    BOOL isFriend=[self.xmpp.xmppRoster.xmppRosterStorage userExistsWithJID:jid xmppStream:self.xmpp.xmppStream];
+    if (isFriend) {
+        XMPPRosterCoreDataStorage *rosterStorage = [XMPPManager sharedInstance].xmppRosterStorage;
+        XMPPStream *stream = [XMPPManager sharedInstance].xmppStream;
+        XMPPUserCoreDataStorageObject* user = [rosterStorage userForJID:jid xmppStream:stream managedObjectContext:rosterStorage.mainThreadManagedObjectContext];
+        if ([user.subscription isEqualToString:@"both"]) {
+            isFriend=YES;
+        }else{
+            isFriend=NO;
+        }
+        
+    } else {
+        isFriend=NO;
+    }
+    return isFriend;
+ 
+    
+    
+
+}
+
+-(void)changeButtonFunction:(NSString *)affiliation
+{
+    if ([affiliation isEqualToString:@"10"] && self.isOwner == 0) {
+        DDLogInfo(@"------->");
+    }else
+    {
+        if ([self checkFriends:self.memberVO.jid]) {
+            self.sendButton = [UIButton buttonWithType:UIButtonTypeCustom];
+            [self.sendButton setBackgroundImage:[UIImage imageNamed:@"btn-seed-message"] forState:UIControlStateNormal];
+            [self.sendButton setBackgroundImage:[UIImage imageNamed:@"btn-seed-message-sel"] forState:UIControlStateHighlighted];
+            self.sendButton.frame = CGRectMake(9, self.groupRoleCell.frame.origin.y + 76, 147, 44);
+            [self.sendButton addTarget:self action:@selector(sendMessageToSomeOne:) forControlEvents:UIControlEventTouchUpInside];
+            [self.view addSubview:self.sendButton];
+        }else
+        {
+            self.addButton = [UIButton buttonWithType:UIButtonTypeCustom];
+            [self.addButton setBackgroundImage:[UIImage imageNamed:@"btn-add-friend"] forState:UIControlStateNormal];
+            [self.addButton setBackgroundImage:[UIImage imageNamed:@"btn-add-friend-sel"] forState:UIControlStateHighlighted];
+            self.addButton.frame = CGRectMake(9, self.groupRoleCell.frame.origin.y + 76, 147, 44);
+            [self.addButton addTarget:self action:@selector(addFriend:) forControlEvents:UIControlEventTouchUpInside];
+            [self.view addSubview:self.addButton];
+        }
+    }
+
+    
+    if (self.isOwner == 0 || self.isOwner == 1) {
+        if ([affiliation isEqualToString:@"10"] && self.isOwner == 0) {
+            DDLogInfo(@"------->");
+        }else
+        {
+            self.removeButton = [UIButton buttonWithType:UIButtonTypeCustom];
+            [self.removeButton setBackgroundImage:[UIImage imageNamed:@"btn-move-member"] forState:UIControlStateNormal];
+            [self.removeButton setBackgroundImage:[UIImage imageNamed:@"btn-move-member-sel"] forState:UIControlStateHighlighted];
+            self.removeButton.frame = CGRectMake(164, self.groupRoleCell.frame.origin.y + 76, 147, 44);
+            [self.removeButton addTarget:self action:@selector(removeSomeBodyIntoRoom:) forControlEvents:UIControlEventTouchUpInside];
+            [self.view addSubview:self.removeButton];
+        }
+    }
+    
+    }
+
+- (void)didReceiveMemoryWarning
+{
+    [super didReceiveMemoryWarning];
+    // Dispose of any resources that can be recreated.
+}
+
+-(void)removeSomeBodyIntoRoom:(UIButton *)sender
+{
+    IMAlert *alert = [[IMAlert alloc] init];
+    [alert alertCancelOK:@"确定移除？" delegate:self];
+}
+
+-(void)sendMessageToSomeOne:(UIButton *)sender
+{
+    RLSendMessageVC *sendMessageVC = [[RLSendMessageVC alloc] init];
+    sendMessageVC.isInfo = -1;
+    sendMessageVC.friendJID = [XMPPJID jidWithString:self.memberVO.jid];
+    sendMessageVC.type = @"chat";
+    [self.navigationController pushViewController:sendMessageVC animated:YES];
+}
+
+-(void)addFriend:(UIButton *)sender
+{
+    XMPPJID *jid = [XMPPJID jidWithString:self.memberVO.jid];
+    [self.xmpp AddFriend:jid.user];
+    IMAlert *alert = [[IMAlert alloc] init];
+    [alert alert:@"申请已发送" delegate:self];
+}
+
+#pragma mark - UIAlertViewDelegate
+- (void)alertView:(UIAlertView *)alertView clickedButtonAtIndex:(NSInteger)buttonIndex
+{
+    if (buttonIndex != 0) {
+        [self.xmppRoom deactivate];
+        [self.logic leaveGroupByUserJID:self.memberVO.jid andRoomName:self.xmppRoom.roomJID.user success:^(id json) {
+            [self.navigationController popViewControllerAnimated:YES];
+        } failure:^(NSError *err) {
+            [self failureHideHUD];
+        }];
+    }
+}
+@end

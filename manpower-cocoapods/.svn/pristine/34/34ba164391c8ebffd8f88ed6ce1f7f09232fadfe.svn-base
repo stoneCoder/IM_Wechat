@@ -1,0 +1,35 @@
+//
+//  RLFriendLogic.m
+//  manpower
+//
+//  Created by hanjin on 14-6-6.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import "RLFriendLogic.h"
+#import "Service.h"
+
+@implementation RLFriendLogic
+DEFINE_SINGLETON_FOR_CLASS(RLFriendLogic)
+-(void)searchFriendInfoByAccount:(NSString *)aAccount success:(void (^)(id json))success failure:(void (^)( NSError *err))failure{
+
+    NSDictionary *parameter = @{@"username":aAccount,
+                                @"type":@"findUser"};
+    [[Service sharedService] get:@"plugins/ofsearchplugin/ofsearchplugin" Parameters:parameter success:^(AFHTTPRequestOperation * o, id json) {
+        success(json);
+    } failure:^(AFHTTPRequestOperation * o, NSError * err) {
+        failure(err);
+    }];
+}
+
++(void)getFriendWithKeyword:(NSString*)keyword
+                     success:(void (^)(id json))success
+                     failure:(void (^)(id json))failure{
+    NSDictionary *parameter = @{@"username":keyword,
+                                @"type":@"findUser"};
+    NSString *uri = @"plugins/ofsearchplugin/ofsearchplugin";
+    NSString *urlStr = [NSString stringWithFormat:@"%@%@",API,uri];
+    
+    [RLBaseLogic post:urlStr Parameters:parameter success:success failure:failure withView:nil];
+}
+@end

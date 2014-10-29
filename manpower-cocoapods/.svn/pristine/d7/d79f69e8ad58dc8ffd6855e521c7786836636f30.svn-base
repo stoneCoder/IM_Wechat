@@ -1,0 +1,162 @@
+//
+//  RLSignatureVC.m
+//  manpower
+//
+//  Created by WangShunzhou on 14-9-15.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import "RLTextViewEditor.h"
+#import "RLGroupVO.h"
+#import "RLRoomLogic.h"
+#import "XMPPManager.h"
+#import "RLRoom.h"
+
+@interface RLTextViewEditor ()<UITextViewDelegate>
+@property(nonatomic, strong) NSString *placeholder;
+@property(nonatomic, strong) NSString *text;
+@property(nonatomic) NSInteger maxLength;
+
+@property(nonatomic) RLGroupInfoType type;
+@property (nonatomic) IBOutlet UITextView *textView;
+@property(nonatomic, assign) IBOutlet UILabel *remainTextLabel;
+@property(nonatomic, assign) IBOutlet UILabel *placeholderLabel;
+@end
+
+@implementation RLTextViewEditor
+
++(RLTextViewEditor*)textViewEditorWithType:(RLGroupInfoType)type withText:(NSString*)text{
+    RLTextViewEditor* editor = [[RLTextViewEditor alloc] initWithEditorType:type withText:text];
+    return editor;
+}
+
+-(id)initWithEditorType:(RLGroupInfoType)type withText:(NSString*)text{
+    self = [super initWithNibName:nil bundle:nil];
+    self.type = type;
+    switch (type) {
+        case RLGroupInfoTypeSubject:
+            self.maxLength = 14;
+            self.placeholder = @"点此输入标签";
+            self.text = text;
+            break;
+        case RLGroupInfoTypeDescription:
+            self.maxLength = 30;
+            self.placeholder = @"点此输入公告";
+            self.text = text;
+            break;
+        default:
+            break;
+    }
+    return self;
+}
+
+- (id)initWithNibName:(NSString *)nibNameOrNil bundle:(NSBundle *)nibBundleOrNil
+{
+    self = [super initWithNibName:nibNameOrNil bundle:nibBundleOrNil];
+    if (self) {
+        NSAssert(NO, @"不允许直接init，请通过initWithEditorType方法调用");
+    }
+    return self;
+}
+
+- (void)viewDidLoad
+{
+    [super viewDidLoad];
+    [self setReturnBtnTitle:@"返回" BadgeNumber:0];
+    self.textView.layer.borderColor = [UIColorFromRGB(0x999999) CGColor];
+    self.textView.layer.borderWidth = 0.5;
+    self.textView.delegate = self;
+    self.textView.text = self.text;
+    if (NSFoundationVersionNumber <= NSFoundationVersionNumber_iOS_6_1) {
+        self.textView.contentInset = UIEdgeInsetsMake(0, -3, 0, -3);
+    }
+    
+    self.placeholderLabel.text = self.placeholder;
+    
+//    switch (self.type) {
+//        case RLGroupInfoTypeSubject:
+//            if (_group.roomSubject.length) {
+//                self.textView.text = _group.roomSubject;
+//            }
+//            break;
+//        case RLGroupInfoTypeDescription:
+//            if (_group.roomDescription.length) {
+//                self.textView.text = _group.roomDescription;
+//            }
+//            break;
+//        default:
+//            break;
+//    }
+
+    self.remainTextLabel.text = [NSString stringWithFormat:@"%d", (int)(self.maxLength - self.textView.text.length)];
+
+    __block UIButton *rightButton = [self setRightBarButtonWithTitle:@"完成" withTarget:self withSelector:@selector(doneClicked:)];
+    @weakify(self);
+    [self.textView.rac_textSignal subscribeNext:^(NSString *newString){
+        @strongify(self);
+        // 剩余字符
+        self.remainTextLabel.text = [NSString stringWithFormat:@"%d", (int)(self.maxLength - self.textView.text.length)];
+    }];
+    
+    // 显示placeholder
+    RAC(self.placeholderLabel, hidden) = [RACSignal combineLatest:@[self.textView.rac_textSignal] reduce:^(NSString *newString){
+        return @(newString.length != 0);
+    }];
+    
+    RAC(rightButton, enabled) = [RACSignal combineLatest:@[self.textView.rac_textSignal] reduce:^(NSString *newString){
+        return @(newString.length <= _maxLength);
+    }];
+}
+
+- (void)didReceiveMemoryWarning
+{
+    [super didReceiveMemoryWarning];
+    // Dispose of any resources that can be recreated.
+}
+
+-(void)doneClicked:(id)sender{
+    if (self.textView.text.length > self.maxLength) {
+        return;
+    }
+    NSString *text = [self.textView.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+//    if (text.length == 0) {
+//        return;
+//    }
+    switch (_type) {
+        case RLGroupInfoTypeDescription:
+            _group.roomDescription = text;
+            _room.roomDescription = text;
+            break;
+        case RLGroupInfoTypeSubject:
+            _group.roomSubject = text;
+            _room.roomSubject = text;
+            break;
+        default:
+            break;
+    }
+    @weakify(self);
+    if (_group) {
+        [RLRoomLogic updateRoom:_group.roomName withUserJID:[XMPPManager sharedInstance].xmppStream.myJID.bare withDescription:_group.roomDescription withSubject:_group.roomSubject withNaturalName:_group.roomNaturalLanguageName withView:self.view success:^(id json){
+            @strongify(self);
+            [self.navigationController popViewControllerAnimated:YES];
+        } failure:NULL];
+    }else{
+        [_room updateToServer];
+        [self.navigationController popViewControllerAnimated:YES];
+    }
+    
+    
+}
+
+//-(BOOL)textView:(UITextView *)textView shouldChangeTextInRange:(NSRange)range replacementText:(NSString *)text{
+//    NSString *temp = [textView.text stringByReplacingCharactersInRange:range withString:text];
+////    if (temp.length > self.maxLength) {
+////        textView.text = [temp substringToIndex:self.maxLength];
+////        return NO;
+////    }
+//    self.remainTextLabel.text = [NSString stringWithFormat:@"%d", self.maxLength - temp.length];
+//
+//    return YES;
+//}
+
+@end

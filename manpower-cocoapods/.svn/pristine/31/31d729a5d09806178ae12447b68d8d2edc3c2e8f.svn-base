@@ -1,0 +1,100 @@
+//
+//  QBAssetsCollectionViewCell.m
+//  QBImagePickerController
+//
+//  Created by Tanaka Katsuma on 2013/12/31.
+//  Copyright (c) 2013年 Katsuma Tanaka. All rights reserved.
+//
+
+#import "QBAssetsCollectionViewCell.h"
+
+// Views
+#import "QBAssetsCollectionOverlayView.h"
+#import "QBAssetsCollectionViewController.h"
+
+@interface QBAssetsCollectionViewCell ()
+
+@property (nonatomic, strong) UIImageView *imageView;
+@property (nonatomic, strong) QBAssetsCollectionOverlayView *overlayView;
+
+@end
+
+@implementation QBAssetsCollectionViewCell
+
+- (instancetype)initWithFrame:(CGRect)frame
+{
+    self = [super initWithFrame:frame];
+    
+    if (self) {
+        self.showsOverlayViewWhenSelected = YES;
+        
+        // Create a image view
+        UIImageView *imageView = [[UIImageView alloc] initWithFrame:self.contentView.bounds];
+        imageView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        
+        [self.contentView addSubview:imageView];
+        self.imageView = imageView;
+        
+        _checkmarkView = [[QBAssetsCollectionCheckmarkView alloc] initWithFrame:CGRectMake(self.bounds.size.width - (4.0 + 24.0), self.bounds.size.height - (4.0 + 24.0), 24.0, 24.0)];
+        _checkmarkView.autoresizingMask = UIViewAutoresizingNone;
+        
+//        _checkmarkView.layer.shadowColor = [[UIColor grayColor] CGColor];
+//        _checkmarkView.layer.shadowOffset = CGSizeMake(0, 0);
+//        _checkmarkView.layer.shadowOpacity = 0.6;
+//        _checkmarkView.layer.shadowRadius = 2.0;
+        
+        _checkmarkView.assetCollectionCell = self;
+        [self addSubview:_checkmarkView];
+    }
+    
+    return self;
+}
+
+- (void)setSelected:(BOOL)selected
+{
+    [super setSelected:selected];
+    
+    // Show/hide overlay view
+//    if (selected && self.showsOverlayViewWhenSelected) {
+//        [self hideOverlayView];
+//        [self showOverlayView];
+//    } else {
+//        [self hideOverlayView];
+//    }
+    
+}
+
+- (void)showOverlayView
+{
+    QBAssetsCollectionOverlayView *overlayView = [[QBAssetsCollectionOverlayView alloc] initWithFrame:self.contentView.bounds];
+    overlayView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    
+    [self.contentView addSubview:overlayView];
+    self.overlayView = overlayView;
+}
+
+- (void)hideOverlayView
+{
+    [self.overlayView removeFromSuperview];
+    self.overlayView = nil;
+}
+
+
+#pragma mark - Accessors
+
+- (void)setAsset:(ALAsset *)asset
+{
+    _asset = asset;
+    
+    // Update view
+    self.imageView.image = [UIImage imageWithCGImage:[asset thumbnail]];
+    NSURL *assetURL = [asset valueForProperty:ALAssetPropertyAssetURL];
+    
+    if ([self.collectionViewController.imagePickerController.selectedAssetURLs containsObject:assetURL]) {
+        [_checkmarkView setChecked:YES];
+    }else{
+        [_checkmarkView setChecked:NO];
+    }
+    [_checkmarkView setNeedsDisplay];
+}
+@end

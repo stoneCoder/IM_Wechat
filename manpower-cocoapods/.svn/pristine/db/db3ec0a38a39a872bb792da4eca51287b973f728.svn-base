@@ -1,0 +1,69 @@
+//
+//  ZMMessage.h
+//  manpower
+//
+//  Created by WangShunzhou on 14-8-22.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import <Foundation/Foundation.h>
+#import <CoreData/CoreData.h>
+@class XMPPJID;
+@protocol IMMessageDelegate;
+
+
+@interface ZMMessage : NSManagedObject
+
+@property (nonatomic, retain) NSString * desc;
+@property (nonatomic, retain) NSString * fileName;
+@property (nonatomic, retain) NSString * friendBareJID;
+@property (nonatomic, retain) NSString * fromBareJID;
+@property (nonatomic, retain) NSString * fromJID;
+@property (nonatomic, retain) NSString * localFilePath;
+@property (nonatomic, retain) NSString * msg;
+@property (nonatomic) int32_t msgType;
+@property (nonatomic, retain) NSString * myBareJID;
+@property (nonatomic, retain) NSString * nickname;
+@property (nonatomic) BOOL outgoing;
+@property (nonatomic, retain) NSDate* remoteTimestamp;
+@property (nonatomic, retain) NSString * roomJID;
+@property (nonatomic, retain) NSDate* sendTime;
+@property (nonatomic) int32_t status;
+@property (nonatomic, retain) NSDate * timestamp;
+@property (nonatomic, retain) NSString * toBareJID;
+@property (nonatomic, retain) NSString * toConversationJID;
+@property (nonatomic, retain) NSString * toJID;
+@property (nonatomic, retain) NSString * type;
+@property (nonatomic) BOOL unread;
+@property (nonatomic, retain) NSString * uuid;
+@property (nonatomic, retain) NSString * avatar;
+
+@property (nonatomic, assign) id<IMMessageDelegate> delegate;
+
+-(void)sendImage:(UIImage*)image withParameters:(NSDictionary*)parameters;
+-(void)sendVoice:(NSString*)filePath withParameters:(NSDictionary*)parameters;
+-(void)sendText:(NSString*)text;
+-(void)sendMessage:(NSInteger)msgType withGroupchatType:(NSString*)type fromJID:(XMPPJID*)fromJID toJID:(XMPPJID*)toJID withAttachment:(id)attachment;
+
+-(void)sendXMPPMessage:(NSDictionary*)bodyDic;
+-(BOOL)save;
+-(void)afterMessageSent;
+
+-(CGFloat)getRowHeight:(BOOL)showTimeLabel;
+
+-(BOOL)isGroupChat;
+-(BOOL)isChat;
+
+-(void)getMessage:(NSString*)message withArray:(NSMutableArray*)array;
+- (CGSize)getContentSize;
+
+-(void)setupCryptProperties;
+@end
+
+
+
+@protocol IMMessageDelegate <NSObject>
+@optional
+-(void)iMMessage:(ZMMessage*)message uploadingImageWithPercentage:(NSString*)percentage;
+-(void)iMMessage:(ZMMessage*)message uploadingVoiceWithPercentage:(NSString*)percentage;
+@end

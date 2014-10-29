@@ -1,0 +1,218 @@
+//
+//  RLMyInfo.m
+//  manpower
+//
+//  Created by WangShunzhou on 14-6-10.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import "RLMyInfo.h"
+#import "RNEncryptor.h"
+#import "RNDecryptor.h"
+#import "JSONKit.h"
+#import <objc/runtime.h>
+#import "RLPersonLogic.h"
+#import "AFNetworking.h"
+#import "IMMessageHelper.h"
+
+
+@implementation NSDictionary(NumberValue)
+
+-(NSNumber*)objectForNumberKey:(NSString*)key{
+    if (![[self objectForKey:key] isEqual:[NSNull null]]) {
+        return @([[self objectForKey:key] integerValue]);
+    }
+    return @0;
+}
+
+-(NSString*)objectForStringKey:(NSString*)key{
+    if (![[self objectForKey:key] isEqual:[NSNull null]]) {
+        return [self objectForKey:key];
+    }
+    return @"";
+}
+
+@end
+
+@implementation RLMyInfo
+DEFINE_SINGLETON_FOR_CLASS(RLMyInfo);
+
+/**
+ *  @abstract 读写本地存储用户账号、密码 上述隐私信息以加密文件的方式存储在本地。
+ */
+-(void)loadUserData{
+    // 存储在Library路径下，文件名为001.dat。不要取有意义的文件名。
+    NSString *filePath = [NSHomeDirectory() stringByAppendingPathComponent:kCryptFilePath];
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    NSDictionary *dic;
+    if (![fileManager fileExistsAtPath:filePath]) {
+        [fileManager createFileAtPath:filePath contents:nil attributes:nil];
+    }
+    NSData *data = [NSData dataWithContentsOfFile:filePath];
+    
+    NSError *err = nil;
+    NSData *decryData = [RNDecryptor decryptData:data withSettings:kRNCryptorAES256Settings password:kCryptPwd error:&err];
+    if (err) {
+        NSLog(@"Decrypt error: %@", err);
+    }else{
+        dic = [decryData objectFromJSONData];
+        [self setValuesForKeysWithDictionary:dic];
+    }
+    
+}
+
+-(void)saveUserData{
+    NSString *filePath = [NSHomeDirectory() stringByAppendingPathComponent:kCryptFilePath];
+    NSError *err;
+    NSDictionary *dic = [self dictionaryValue];
+    NSData *encryData = [RNEncryptor encryptData:[dic JSONData] withSettings:kRNCryptorAES256Settings password:kCryptPwd error:&err];
+    [encryData writeToFile:filePath atomically:YES];
+    if (err) {
+        NSLog(@"Encrypt error: %@", err);
+    }
+}
+
+- (NSDictionary *)dictionaryValue
+{
+    NSMutableArray *propertyKeys = [NSMutableArray array];
+    Class currentClass = self.class;
+    
+    while ([currentClass superclass]) { // avoid printing NSObject's attributes
+        unsigned int outCount, i;
+        objc_property_t *properties = class_copyPropertyList(currentClass, &outCount);
+        for (i = 0; i < outCount; i++) {
+            objc_property_t property = properties[i];
+            const char *propName = property_getName(property);
+            if (propName) {
+                NSString *propertyName = [NSString stringWithUTF8String:propName];
+                [propertyKeys addObject:propertyName];
+            }
+        }
+        free(properties);
+        currentClass = [currentClass superclass];
+    }
+    
+    return [self dictionaryWithValuesForKeys:propertyKeys];
+}
+
+-(void)getUserInfoFromServer{
+    [RLPersonLogic getPersonInfoWithUsername:self.username withView:nil success:^(NSDictionary *json){
+        NSDictionary *dic = json[@"returnObj"];
+        self.name = [dic objectForStringKey:@"name"];
+        self.username = [dic objectForStringKey:@"username"];
+        self.signature = [dic objectForStringKey:@"signature"];
+        self.birthday = [dic objectForStringKey:@"birthday"];
+        
+        NSString *photo = [dic objectForStringKey:@"photo"];
+        self.shouldChangePhoto = self.photo == photo ? NO : YES;
+        self.photo = photo;
+        
+        NSString *background = [dic objectForStringKey:@"background"];
+        self.shouldChangeBackground = self.background == background ? NO : YES;
+        self.background = [dic objectForStringKey:@"background"];
+        
+        self.locationName = [dic objectForStringKey:@"locationName"];
+        
+        self.sex = [dic objectForNumberKey:@"sex"];
+        self.visitPurview = [dic objectForNumberKey:@"visitPurview"];
+        self.friendValidate = [dic objectForNumberKey:@"friendValidate"];
+        self.locationId = [dic objectForNumberKey:@"locationId"];
+//        [self setValuesForKeysWithDictionary:dic];
+        [self saveUserData];
+    } failure:^(id json){
+        DDLogError(@"%@",json[@"message"]);
+    }];
+}
+
+-(void)updateInfo{
+    [self updateInfoWithSuccess:NULL failure:NULL];
+}
+
+-(void)updateInfoWithSuccess:(void(^)(id responseObject))success failure:(void(^)(id responseObject))failure{
+    [RLPersonLogic setPersonInfoWithUsername:self.username
+                               withSignature:self.signature
+                                  withGender:self.sex
+                                    withName:self.name
+                                withBirthday:self.birthday
+                              withLocationId:self.locationId
+                            withLocationName:self.locationName
+                        withFriendValidation:self.friendValidate
+                            withVisitPurview:self.visitPurview
+                                    withView:nil
+                                     success:success
+                                     failure:failure];
+}
+
+-(void)updatePassword:(NSString*)password
+      withOldPassword:(NSString*)oldPassword
+             withView:(UIView*)view
+              success:(void(^)(id responseObject))success{
+    [RLPersonLogic resetPassword:password
+                 withOldPassword:oldPassword
+                    withUsername:self.username
+                        withView:view
+                         success:success
+                         failure:NULL];
+}
+
+-(void)updatePhoto{
+    [RLPersonLogic setPhoto:self.localPhoto withUsername:self.username withView:nil success:^(id responseObject){
+        NSString *fileUrlStr = [[responseObject objectForKey:@"returnObj"] objectForKey:@"photo"];
+        NSString *filename = [fileUrlStr lastPathComponent];
+        NSString *filepath = [PHOTO_DIR_PATH stringByAppendingPathComponent:filename];
+        if ([IMMessageHelper moveFile:self.localPhoto to:filepath]) {
+            self.photo = fileUrlStr;
+            self.localPhoto = filepath;
+            [self saveUserData];
+        }
+    } failure:NULL];
+}
+
+-(void)updateBackground{
+    [RLPersonLogic setBackgroundImage:self.localBackground withUsername:self.username withView:nil
+                              success:^(id responseObject){
+        NSString *fileUrlStr = [[responseObject objectForKey:@"returnObj"] objectForKey:@"background"];
+        NSString *filename = [fileUrlStr lastPathComponent];
+        NSString *filepath = [PHOTO_DIR_PATH stringByAppendingPathComponent:filename];
+        if ([IMMessageHelper moveFile:self.localBackground to:filepath]) {
+            self.background = fileUrlStr;
+            self.localBackground = filepath;
+            [self saveUserData];	
+        }
+    } failure:NULL];
+}
+
+-(void)downloadPhotoWithSuccess:(void(^)(id response))success
+        failure:(void(^)(NSError *error))failure{
+    if ([NSURL URLWithString:self.photo] && self.photo.length) {
+        NSString *filename = [[[self.photo lastPathComponent] componentsSeparatedByString:@"."] objectAtIndex:0];
+        NSString *filePath = [PHOTO_DIR_PATH stringByAppendingPathComponent:filename];
+        [IMMessageHelper createDirectory:[filePath stringByDeletingLastPathComponent]];
+        [RLPersonLogic download:filePath withURL:self.photo success:^(id response){
+            self.localPhoto = filePath;
+            if (success) {
+                success(response);
+            }
+        } failure:NULL];
+    }
+}
+
+-(void)downloadBackgroundWithSuccess:(void(^)(id response))success
+                        failure:(void(^)(NSError *error))failure{
+    if ([NSURL URLWithString:self.background] && self.background.length) {
+        NSString *filename = [[[self.background lastPathComponent] componentsSeparatedByString:@"."] objectAtIndex:0];
+        NSString *filePath = [PHOTO_DIR_PATH stringByAppendingPathComponent:filename];
+        [RLPersonLogic download:filePath withURL:self.background success:^(id response){
+            self.localBackground = filePath;
+            if (success) {
+                success(response);
+            }
+        } failure:NULL];
+    }
+}
+
+-(NSString*)description{
+    return [[self dictionaryValue] description];
+}
+
+@end

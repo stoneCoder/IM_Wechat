@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>IDESourceControlProjectFavoriteDictionaryKey</key>
+	<false/>
+	<key>IDESourceControlProjectIdentifier</key>
+	<string>655F935E-7998-484F-BBAB-9EE5D1F91C4C</string>
+	<key>IDESourceControlProjectName</key>
+	<string>manpower</string>
+	<key>IDESourceControlProjectOriginsDictionary</key>
+	<dict>
+		<key>1DF7E1D7-847A-479E-8165-E8E9F10B4E1B</key>
+		<string>http://10.10.10.8/svn/58tc/ios_project/%E4%BA%BA%E5%8A%9B/%E7%AC%AC%E4%BA%8C%E6%9C%9F/manpower-cocoapods</string>
+	</dict>
+	<key>IDESourceControlProjectPath</key>
+	<string>manpower.xcworkspace</string>
+	<key>IDESourceControlProjectRelativeInstallPathDictionary</key>
+	<dict>
+		<key>1DF7E1D7-847A-479E-8165-E8E9F10B4E1B</key>
+		<string>..</string>
+	</dict>
+	<key>IDESourceControlProjectRepositoryRootDictionary</key>
+	<dict>
+		<key>1DF7E1D7-847A-479E-8165-E8E9F10B4E1B</key>
+		<string>http://10.10.10.8/svn/58tc</string>
+	</dict>
+	<key>IDESourceControlProjectURL</key>
+	<string>http://10.10.10.8/svn/58tc/ios_project/%E4%BA%BA%E5%8A%9B/%E7%AC%AC%E4%BA%8C%E6%9C%9F/manpower-cocoapods/manpower.xcworkspace</string>
+	<key>IDESourceControlProjectVersion</key>
+	<integer>110</integer>
+	<key>IDESourceControlProjectWCCIdentifier</key>
+	<string>1DF7E1D7-847A-479E-8165-E8E9F10B4E1B</string>
+	<key>IDESourceControlProjectWCConfigurations</key>
+	<array>
+		<dict>
+			<key>IDESourceControlRepositoryExtensionIdentifierKey</key>
+			<string>public.vcs.subversion</string>
+			<key>IDESourceControlWCCIdentifierKey</key>
+			<string>1DF7E1D7-847A-479E-8165-E8E9F10B4E1B</string>
+			<key>IDESourceControlWCCName</key>
+			<string>manpower-cocoapods</string>
+		</dict>
+	</array>
+</dict>
+</plist>

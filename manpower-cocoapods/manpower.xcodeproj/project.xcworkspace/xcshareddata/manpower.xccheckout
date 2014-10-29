@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>IDESourceControlProjectFavoriteDictionaryKey</key>
+	<false/>
+	<key>IDESourceControlProjectIdentifier</key>
+	<string>6175D33A-4267-4C0A-A8C8-AE784BC54BD8</string>
+	<key>IDESourceControlProjectName</key>
+	<string>manpower</string>
+	<key>IDESourceControlProjectOriginsDictionary</key>
+	<dict>
+		<key>57D704EB-090D-4F35-BCAF-590F2CCA8056</key>
+		<string>http://10.10.10.8/svn/58tc/ios_project/%E4%BA%BA%E5%8A%9B/IM/manpower</string>
+	</dict>
+	<key>IDESourceControlProjectPath</key>
+	<string>manpower.xcodeproj/project.xcworkspace</string>
+	<key>IDESourceControlProjectRelativeInstallPathDictionary</key>
+	<dict>
+		<key>57D704EB-090D-4F35-BCAF-590F2CCA8056</key>
+		<string>../..</string>
+	</dict>
+	<key>IDESourceControlProjectRepositoryRootDictionary</key>
+	<dict>
+		<key>57D704EB-090D-4F35-BCAF-590F2CCA8056</key>
+		<string>http://10.10.10.8/svn/58tc</string>
+	</dict>
+	<key>IDESourceControlProjectURL</key>
+	<string>http://10.10.10.8/svn/58tc/ios_project/%E4%BA%BA%E5%8A%9B/IM/manpower/manpower.xcodeproj</string>
+	<key>IDESourceControlProjectVersion</key>
+	<integer>110</integer>
+	<key>IDESourceControlProjectWCCIdentifier</key>
+	<string>57D704EB-090D-4F35-BCAF-590F2CCA8056</string>
+	<key>IDESourceControlProjectWCConfigurations</key>
+	<array>
+		<dict>
+			<key>IDESourceControlRepositoryExtensionIdentifierKey</key>
+			<string>public.vcs.subversion</string>
+			<key>IDESourceControlWCCIdentifierKey</key>
+			<string>57D704EB-090D-4F35-BCAF-590F2CCA8056</string>
+			<key>IDESourceControlWCCName</key>
+			<string>manpower</string>
+		</dict>
+	</array>
+</dict>
+</plist>

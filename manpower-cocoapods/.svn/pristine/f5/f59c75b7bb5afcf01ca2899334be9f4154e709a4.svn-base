@@ -1,0 +1,226 @@
+//
+//  RLGroupSetInfoVC.m
+//  manpower
+//
+//  Created by hanjin on 14-6-11.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import "RLCreateRoomInfoVC.h"
+#import "RLGroupLogic.h"
+#import "RLGroupMemberListVC.h"
+#import "RLGroupInviteVC.h"
+#import "RLGroupChatVC.h"
+#import "RLGroupVO.h"
+#import "RLGroupMemberJoinVC.h"
+#import "IMMessageStorage.h"
+#import "RLGroupInfoHeaderView.h"
+#import <XMPPRoomCoreDataStorage.h>
+#import "RLTextViewEditor.h"
+#import "RLRoom.h"
+
+@interface RLCreateRoomInfoVC ()
+{
+    NSString * showMsg;
+    UILabel *signatureLabel;
+    UIView *footerView;
+    RLGroupInfoHeaderView *headerView;
+    RLGroupVO *group;
+}
+@property (strong,nonatomic) RLGroupLogic * logic;
+@property (strong,nonatomic) RLGroupInfoHeaderView *headerView;
+
+@end
+
+
+static NSInteger const roomDescriptionIndex = 2;
+static NSInteger const roomSubjectIndex = 1;
+
+@implementation RLCreateRoomInfoVC
+@synthesize headerView;
+@synthesize group;
+
+
+- (id)initWithNibName:(NSString *)nibNameOrNil bundle:(NSBundle *)nibBundleOrNil
+{
+    self = [super initWithNibName:nibNameOrNil bundle:nibBundleOrNil];
+    if (self) {
+        // Custom initialization
+        self.xmppStream=[XMPPManager sharedInstance].xmppStream;
+        [self.xmppStream addDelegate:self delegateQueue:dispatch_get_main_queue()];
+        
+    }
+    return self;
+}
+
+- (void)viewDidLoad
+{
+    [super viewDidLoad];
+//    if (!group) {
+//        group = [[RLGroupVO alloc] init];
+//    }
+    
+    [self makeNaviLeftButtonVisible:YES];
+    
+    [self setTitleText:@"群资料"];
+    
+    [self setupHeaderView];
+}
+
+-(void)viewWillAppear:(BOOL)animated{
+    [super viewWillAppear:animated];
+    [self.tableView reloadData];
+}
+
+#pragma mark - Initailize views
+-(void)setupHeaderView{
+    BOOL changeAble = YES;
+    headerView = [RLGroupInfoHeaderView headerViewWithViewController:self withPhotoChangeable:changeAble withBackgroundChangeable:NO withNameChangeable:changeAble];
+//    headerView.group = self.group;
+    headerView.room = self.room;
+    // 设置tableview大小
+    [self.tableView setFrame:CGRectMake(0, 0, self.view.frame.size.width, self.view.frame.size.height-44)];
+    self.tableView.tableHeaderView = headerView;
+    
+    [self bindValuesToView];
+}
+
+-(void)bindValuesToView{
+    @weakify(self);
+    
+//     [RACObserve(group, roomNaturalLanguageName) subscribeNext:^(NSString *newString){
+//         @strongify(self);
+//         self.headerView.titleTextField.text = newString;
+//     }];
+//    
+//    [RACObserve(group, ownerName) subscribeNext:^(NSString *newString){
+//        @strongify(self);
+//        self.headerView.subtitleLabel.text = [NSString stringWithFormat:@"群主:%@", newString];
+//    }];
+//    
+//    [RACObserve(group, photo) subscribeNext:^(NSString *newString){
+//        @strongify(self);
+//        NSURL *url = [NSURL URLWithString:newString];
+//        [self.headerView.photoIV sd_setImageWithURL:url placeholderImage:IMAGE_DEFAULT_PERSON];
+//    }];
+
+    [RACObserve(self.room, roomNaturalLanguageName) subscribeNext:^(NSString *newString){
+        @strongify(self);
+        self.headerView.titleTextField.text = newString;
+    }];
+    
+    
+    [RACObserve(self.room, photo) subscribeNext:^(NSString *newString){
+        @strongify(self);
+        NSURL *url = [NSURL URLWithString:newString];
+        [self.headerView.photoIV sd_setImageWithURL:url placeholderImage:IMAGE_DEFAULT_PERSON];
+    }];
+}
+
+
+#pragma mark - tableview datasource
+-(CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath{
+    CGFloat height = 44;
+    NSString *detailText = @"";
+    switch (indexPath.row) {
+        case roomDescriptionIndex:
+            detailText = self.room.roomDescription;
+            break;
+        case roomSubjectIndex:
+            detailText = self.room.roomSubject;
+            break;
+        default:
+            break;
+    }
+    signatureLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 200, 15)];
+    signatureLabel.font = [UIFont systemFontOfSize:14];
+    signatureLabel.numberOfLines = 0;
+    signatureLabel.text = detailText;
+    [signatureLabel sizeToFit];
+    height = signatureLabel.frame.size.height+20;
+    height = height < 44 ? 44 :height;
+    return height;
+}
+
+-(NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section{
+    return 3;
+}
+
+-(UITableViewCell*)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath{
+    static NSString *cellIdentifier = @"RoomInfoCell";
+    
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:cellIdentifier];
+    if (cell == nil) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:cellIdentifier];
+        cell.detailTextLabel.textColor = UIColorFromRGB(0x999999);
+        cell.detailTextLabel.textAlignment = NSTextAlignmentLeft;
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+    }
+    NSString *title;
+    NSString *detailText = @"";
+    
+    switch (indexPath.row) {
+        case 0:
+            title = @"ID";
+            detailText = self.room.roomName;
+            break;
+        case 1:
+            title = @"标签";
+            detailText = self.room.roomSubject;
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+            break;
+        case 2:
+            title = @"公告";
+            detailText = self.room.roomDescription;
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+            break;
+            
+        default:
+            break;
+    }
+    cell.textLabel.text = title;
+    cell.detailTextLabel.text = detailText;
+    cell.detailTextLabel.numberOfLines = 0;
+    [cell.detailTextLabel sizeToFit];
+    return cell;
+}
+
+
+#pragma mark - tableview delegate
+
+-(void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath{
+    switch (indexPath.row) {
+        case 0:
+            break;
+        case 1:
+            [self editRoomSubject];
+            break;
+        case 2:
+            [self editRoomDescription];
+            break;
+        default:
+            break;
+    }
+}
+
+
+#pragma mark - actions
+-(void)editRoomDescription{
+    RLTextViewEditor *textViewEditor = [RLTextViewEditor textViewEditorWithType:RLGroupInfoTypeDescription withText:self.room.roomDescription];
+    textViewEditor.room = self.room;
+    [self.navigationController pushViewController:textViewEditor animated:YES];
+}
+
+-(void)editRoomSubject{
+    RLTextViewEditor *textViewEditor = [RLTextViewEditor textViewEditorWithType:RLGroupInfoTypeSubject withText:self.room.roomSubject];
+    textViewEditor.room = self.room;
+    [self.navigationController pushViewController:textViewEditor animated:YES];
+}
+
+
+- (void)didReceiveMemoryWarning
+{
+    [super didReceiveMemoryWarning];
+}
+
+@end

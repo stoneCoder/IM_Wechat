@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<document type="com.apple.InterfaceBuilder3.CocoaTouch.XIB" version="3.0" toolsVersion="5056" systemVersion="12F37" targetRuntime="iOS.CocoaTouch" variant="6xAndEarlier" propertyAccessControl="none" useAutolayout="YES">
+    <dependencies>
+        <deployment defaultVersion="1536" identifier="iOS"/>
+        <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="3733"/>
+    </dependencies>
+    <objects>
+        <placeholder placeholderIdentifier="IBFilesOwner" id="-1" userLabel="File's Owner" customClass="UIView"/>
+        <placeholder placeholderIdentifier="IBFirstResponder" id="-2" customClass="UIResponder"/>
+        <view contentMode="scaleToFill" id="hUo-6M-GlF" customClass="SendBox">
+            <rect key="frame" x="0.0" y="0.0" width="320" height="172"/>
+            <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
+            <subviews>
+                <view tag="102" contentMode="scaleToFill" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="iN0-l3-epB" userLabel="Top View">
+                    <rect key="frame" x="0.0" y="0.0" width="320" height="51"/>
+                    <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                    <subviews>
+                        <imageView userInteractionEnabled="NO" contentMode="scaleToFill" horizontalHuggingPriority="251" verticalHuggingPriority="251" fixedFrame="YES" image="dialog_bottom_bg" translatesAutoresizingMaskIntoConstraints="NO" id="VTV-fg-CRH">
+                            <rect key="frame" x="0.0" y="0.0" width="320" height="51"/>
+                            <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
+                        </imageView>
+                        <textField opaque="NO" clipsSubviews="YES" tag="101" contentMode="scaleToFill" fixedFrame="YES" contentHorizontalAlignment="left" contentVerticalAlignment="center" minimumFontSize="14" background="dialog_text" translatesAutoresizingMaskIntoConstraints="NO" id="DdP-f9-wkM" userLabel="TextField">
+                            <rect key="frame" x="76" y="15" width="205" height="30"/>
+                            <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
+                            <fontDescription key="fontDescription" type="system" pointSize="14"/>
+                            <textInputTraits key="textInputTraits" autocorrectionType="no" returnKeyType="send" enablesReturnKeyAutomatically="YES"/>
+                        </textField>
+                        <button opaque="NO" tag="100" contentMode="scaleToFill" fixedFrame="YES" contentHorizontalAlignment="center" contentVerticalAlignment="center" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="dCD-Iu-3T1" userLabel="Plus Button">
+                            <rect key="frame" x="6" y="16" width="28" height="28"/>
+                            <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
+                            <state key="normal" image="dialog_add">
+                                <color key="titleShadowColor" white="0.5" alpha="1" colorSpace="calibratedWhite"/>
+                            </state>
+                            <connections>
+                                <action selector="addButtonClicked:" destination="hUo-6M-GlF" eventType="touchUpInside" id="ZhH-WK-VUJ"/>
+                            </connections>
+                        </button>
+                        <button hidden="YES" opaque="NO" tag="104" contentMode="scaleToFill" fixedFrame="YES" contentHorizontalAlignment="center" contentVerticalAlignment="center" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="0S4-Sr-hfe" userLabel="Keyboard Button">
+                            <rect key="frame" x="287" y="19" width="28" height="22"/>
+                            <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
+                            <state key="normal" image="dialog_keyboard">
+                                <color key="titleShadowColor" white="0.5" alpha="1" colorSpace="calibratedWhite"/>
+                            </state>
+                            <connections>
+                                <action selector="keyboardButtonClicked:" destination="hUo-6M-GlF" eventType="touchUpInside" id="frW-u3-t40"/>
+                            </connections>
+                        </button>
+                        <button hidden="YES" opaque="NO" tag="104" contentMode="scaleToFill" fixedFrame="YES" contentHorizontalAlignment="center" contentVerticalAlignment="center" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="i6X-RU-ZnD" userLabel="Keyboard Button2">
+                            <rect key="frame" x="41" y="19" width="28" height="22"/>
+                            <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
+                            <state key="normal" image="dialog_keyboard">
+                                <color key="titleShadowColor" white="0.5" alpha="1" colorSpace="calibratedWhite"/>
+                            </state>
+                            <connections>
+                                <action selector="keyboardButton2Clicked:" destination="hUo-6M-GlF" eventType="touchUpInside" id="faE-gd-Gb3"/>
+                            </connections>
+                        </button>
+                        <button hidden="YES" opaque="NO" tag="105" contentMode="scaleToFill" fixedFrame="YES" contentHorizontalAlignment="center" contentVerticalAlignment="center" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="d1Z-s3-S6a" userLabel="Sound Button">
+                            <rect key="frame" x="76" y="15" width="205" height="30"/>
+                            <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
+                            <state key="normal" image="dialog_speak_normal"/>
+                            <state key="selected" image="dialog_speak_down"/>
+                            <state key="highlighted" image="dialog_speak_down"/>
+                        </button>
+                        <button opaque="NO" contentMode="scaleToFill" fixedFrame="YES" contentHorizontalAlignment="center" contentVerticalAlignment="center" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="N22-d8-jDV" userLabel="Emotion Button">
+                            <rect key="frame" x="41" y="16" width="28" height="28"/>
+                            <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
+                            <state key="normal" image="dialog_emotion">
+                                <color key="titleShadowColor" white="0.5" alpha="1" colorSpace="calibratedWhite"/>
+                            </state>
+                            <connections>
+                                <action selector="emotionButtonClicked:" destination="hUo-6M-GlF" eventType="touchUpInside" id="4R6-r0-I2T"/>
+                            </connections>
+                        </button>
+                        <button opaque="NO" contentMode="scaleToFill" fixedFrame="YES" contentHorizontalAlignment="center" contentVerticalAlignment="center" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="Nob-wU-xgM" userLabel="Micro Phone Button">
+                            <rect key="frame" x="291" y="16" width="19" height="28"/>
+                            <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
+                            <state key="normal" image="dialog_phone">
+                                <color key="titleShadowColor" white="0.5" alpha="1" colorSpace="calibratedWhite"/>
+                            </state>
+                            <connections>
+                                <action selector="micButtonClicked:" destination="hUo-6M-GlF" eventType="touchUpInside" id="LY9-W9-wDq"/>
+                            </connections>
+                        </button>
+                    </subviews>
+                    <color key="backgroundColor" white="1" alpha="1" colorSpace="custom" customColorSpace="calibratedWhite"/>
+                    <freeformSimulatedSizeMetrics key="simulatedDestinationMetrics"/>
+                </view>
+                <view tag="103" contentMode="scaleToFill" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="nnN-S9-N4h" userLabel="Bottom View">
+                    <rect key="frame" x="0.0" y="52" width="320" height="120"/>
+                    <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
+                    <subviews>
+                        <imageView userInteractionEnabled="NO" contentMode="scaleToFill" horizontalHuggingPriority="251" verticalHuggingPriority="251" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="vXA-ng-e9c" userLabel="Seperator">
+                            <rect key="frame" x="0.0" y="1" width="320" height="1"/>
+                            <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
+                            <color key="backgroundColor" white="0.84999999999999998" alpha="1" colorSpace="calibratedWhite"/>
+                        </imageView>
+                        <button hidden="YES" opaque="NO" tag="202" contentMode="scaleToFill" fixedFrame="YES" contentHorizontalAlignment="center" contentVerticalAlignment="center" buttonType="roundedRect" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="Xkc-cv-Wpz">
+                            <rect key="frame" x="164" y="15" width="54" height="44"/>
+                            <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
+                            <state key="normal" title="位置">
+                                <color key="titleShadowColor" white="0.5" alpha="1" colorSpace="calibratedWhite"/>
+                            </state>
+                            <connections>
+                                <action selector="locationButtonClicked:" destination="hUo-6M-GlF" eventType="touchUpInside" id="p0W-17-CM5"/>
+                            </connections>
+                        </button>
+                        <button hidden="YES" opaque="NO" tag="201" contentMode="scaleToFill" fixedFrame="YES" contentHorizontalAlignment="center" contentVerticalAlignment="center" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="SoK-HA-hDi">
+                            <rect key="frame" x="90" y="22" width="59" height="59"/>
+                            <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
+                            <state key="normal" image="dialog_shooting">
+                                <color key="titleShadowColor" white="0.5" alpha="1" colorSpace="calibratedWhite"/>
+                            </state>
+                            <connections>
+                                <action selector="cameraButtonClicked:" destination="hUo-6M-GlF" eventType="touchUpInside" id="bUC-bl-Q7a"/>
+                            </connections>
+                        </button>
+                        <button opaque="NO" tag="200" contentMode="scaleToFill" fixedFrame="YES" contentHorizontalAlignment="center" contentVerticalAlignment="center" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="e6n-Ww-R31">
+                            <rect key="frame" x="16" y="22" width="59" height="59"/>
+                            <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
+                            <state key="normal" image="dialog_photo">
+                                <color key="titleShadowColor" white="0.5" alpha="1" colorSpace="calibratedWhite"/>
+                            </state>
+                            <connections>
+                                <action selector="photoButtonClicked:" destination="hUo-6M-GlF" eventType="touchUpInside" id="2Qf-aP-wOG"/>
+                            </connections>
+                        </button>
+                        <label opaque="NO" clipsSubviews="YES" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" fixedFrame="YES" text="照片" lineBreakMode="tailTruncation" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="23D-lR-XPt">
+                            <rect key="frame" x="30" y="86" width="31" height="21"/>
+                            <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
+                            <fontDescription key="fontDescription" type="system" pointSize="15"/>
+                            <color key="textColor" cocoaTouchSystemColor="darkTextColor"/>
+                            <nil key="highlightedColor"/>
+                        </label>
+                        <label hidden="YES" opaque="NO" clipsSubviews="YES" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" fixedFrame="YES" text="拍摄" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="LFs-u5-jzO">
+                            <rect key="frame" x="104" y="86" width="30" height="21"/>
+                            <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
+                            <fontDescription key="fontDescription" type="system" pointSize="15"/>
+                            <nil key="highlightedColor"/>
+                        </label>
+                    </subviews>
+                    <color key="backgroundColor" white="1" alpha="1" colorSpace="custom" customColorSpace="calibratedWhite"/>
+                    <simulatedScreenMetrics key="simulatedDestinationMetrics" type="retina4"/>
+                </view>
+            </subviews>
+            <color key="backgroundColor" white="1" alpha="1" colorSpace="custom" customColorSpace="calibratedWhite"/>
+            <freeformSimulatedSizeMetrics key="simulatedDestinationMetrics"/>
+            <connections>
+                <outlet property="addButton" destination="dCD-Iu-3T1" id="Szc-9Y-9i2"/>
+                <outlet property="bottomView" destination="nnN-S9-N4h" id="Gt4-lj-Ek6"/>
+                <outlet property="cameraButton" destination="SoK-HA-hDi" id="bgu-MF-prD"/>
+                <outlet property="emotionButton" destination="N22-d8-jDV" id="fuW-Wb-etW"/>
+                <outlet property="keyboardButton" destination="0S4-Sr-hfe" id="dA4-WP-U63"/>
+                <outlet property="keyboardButton2" destination="i6X-RU-ZnD" id="D9x-Zv-taX"/>
+                <outlet property="micButton" destination="Nob-wU-xgM" id="Fhv-se-YdA"/>
+                <outlet property="photoButton" destination="e6n-Ww-R31" id="OOl-bJ-YS8"/>
+                <outlet property="soundButton" destination="d1Z-s3-S6a" id="toP-Fa-G9O"/>
+                <outlet property="textField" destination="DdP-f9-wkM" id="cBQ-SD-6iB"/>
+                <outlet property="topView" destination="iN0-l3-epB" id="x1h-0g-6oU"/>
+            </connections>
+        </view>
+    </objects>
+    <resources>
+        <image name="dialog_add" width="28" height="28"/>
+        <image name="dialog_bottom_bg" width="320" height="51"/>
+        <image name="dialog_emotion" width="28" height="28"/>
+        <image name="dialog_keyboard" width="28" height="18"/>
+        <image name="dialog_phone" width="19" height="28"/>
+        <image name="dialog_photo" width="59" height="59"/>
+        <image name="dialog_shooting" width="59" height="59"/>
+        <image name="dialog_speak_down" width="205" height="30"/>
+        <image name="dialog_speak_normal" width="205" height="30"/>
+        <image name="dialog_text" width="205" height="30"/>
+    </resources>
+</document>

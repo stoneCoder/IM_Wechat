@@ -1,0 +1,159 @@
+//
+//  RLTBC.m
+//  manpower
+//
+//  Created by hanjin on 14-6-4.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import "RLTBC.h"
+#import <CoreGraphics/CoreGraphics.h>
+@interface RLTBC ()
+@property(nonatomic, strong) NSArray *unselImages;//所有item未选中的图片数组
+@property(nonatomic, strong) NSArray *selImages;//所有item选中的图片数组
+@property(nonatomic, strong) NSMutableArray *imageViews;//所有items
+@property(nonatomic, assign) NSInteger currentItemIndex;//当前item的索引
+@property(nonatomic, strong) UIImageView *tabbarBackgroundView;//tabbar自定义的背景
+@end
+
+@implementation RLTBC
+
+- (id)initWithNibName:(NSString *)nibNameOrNil bundle:(NSBundle *)nibBundleOrNil
+{
+    self = [super initWithNibName:nibNameOrNil bundle:nibBundleOrNil];
+    if (self) {
+        // Custom initialization
+    }
+    return self;
+}
+
+- (void)viewDidLoad
+{
+    [super viewDidLoad];
+    // Do any additional setup after loading the view.
+    [[UITabBar appearance] setShadowImage:[[UIImage alloc] init]];
+    self.tabBar.backgroundImage = [[UIImage alloc] init];
+    self.tabBar.selectionIndicatorImage = [[UIImage alloc] init];
+    self.tabBar.backgroundColor=[UIColor whiteColor];
+    
+    
+    self.bangLab=[[UILabel alloc]initWithFrame:CGRectMake(-40, 6, 22, 22)];
+    self.bangLab.backgroundColor = [UIColor colorWithRed:1 green:0.5625 blue:0 alpha:1];
+    self.bangLab.layer.cornerRadius=11;
+    self.bangLab.layer.masksToBounds=YES;
+    self.bangLab.layer.borderColor = [[UIColor colorWithWhite:1 alpha:1] CGColor];
+    self.bangLab.layer.borderWidth = 1;
+    self.bangLab.font=[UIFont boldSystemFontOfSize:12.0];
+    self.bangLab.textColor=[UIColor whiteColor];
+    self.bangLab.text=@"";
+    self.bangLab.textAlignment=NSTextAlignmentCenter;
+    
+}
+/**
+ *  功能:设置消息badge
+ */
+
+-(void)setBadgeNum:(NSString *)aNumStr{
+    if (aNumStr && aNumStr.intValue>0) {
+         self.bangLab.hidden=NO;
+        [self.bangLab setText:aNumStr];
+    } else {
+        self.bangLab.hidden=YES;
+    }
+}
+
+
+
+-(NSString *)currentBadgeNum{
+    if (!self.bangLab.hidden) {
+       return self.bangLab.text;
+    }
+    return nil;
+}
+
+
+- (void)didReceiveMemoryWarning
+{
+    [super didReceiveMemoryWarning];
+    // Dispose of any resources that can be recreated.
+}
+- (void)setViewControllers:(NSArray *)viewControllers
+{
+    [super setViewControllers:viewControllers];
+    if (self.selImages.count == 0) {
+        self.unselImages = [NSArray arrayWithObjects:[UIImage imageNamed:@"tabbar_1"], [UIImage imageNamed:@"tabbar_2"], [UIImage imageNamed:@"tabbar_3"],[UIImage imageNamed:@"tabbar_3"], nil];
+        self.selImages = [NSArray arrayWithObjects:[UIImage imageNamed:@"tabbar_1_sel"], [UIImage imageNamed:@"tabbar_2_sel"], [UIImage imageNamed:@"tabbar_3_sel"],[UIImage imageNamed:@"tabbar_3_sel"], nil];
+    }
+    self.imageViews = [[NSMutableArray alloc] initWithCapacity:0];
+    
+    //初始化每个tab
+//    NSInteger startIndex=0;
+//    for (NSInteger i = 0; i< self.tabBar.subviews.count ;i++) {
+//        UIView *view = [self.tabBar.subviews objectAtIndex:i];
+//        if ([view isKindOfClass:NSClassFromString(@"UITabBarButton")]) {
+//            startIndex = i;
+//            break;
+//        }
+//    }
+//    
+//    for (NSInteger i=startIndex; i< ([viewControllers count] + startIndex); i++) {
+//        UIView *subView = [self.tabBar.subviews objectAtIndex:i];
+//        UIImageView *imgView = [[UIImageView alloc] initWithFrame:CGRectMake(0, 0, 106,35)];
+//        
+//        [imgView setImage:[self.unselImages objectAtIndex:i-startIndex]];
+//        [subView addSubview:imgView];
+//        
+//        if (i==startIndex+1) {
+//            [subView insertSubview:self.bangLab aboveSubview:imgView];
+//            self.bangLab.hidden=YES;
+//        }
+//        
+//        [self.imageViews addObject:imgView];
+//        
+//    }
+    NSInteger subviewMaxIndex = self.tabBar.subviews.count - 1;
+    NSInteger otherViewCount = self.tabBar.subviews.count - viewControllers.count;
+    for (NSInteger i = subviewMaxIndex; i >= otherViewCount; i--) {
+        UIView *subView = [self.tabBar.subviews objectAtIndex:i];
+        UIImageView *imgView = [[UIImageView alloc] initWithFrame:CGRectMake(0, 0, 106,35)];
+        
+        [imgView setImage:[self.unselImages objectAtIndex:i - otherViewCount]];
+        [subView addSubview:imgView];
+        
+        if (i == subviewMaxIndex - 2) {
+            [subView insertSubview:self.bangLab aboveSubview:imgView];
+            self.bangLab.text = @"9";
+            self.bangLab.hidden=YES;
+        }
+        
+        [self.imageViews insertObject:imgView atIndex:0];
+        
+    }
+    
+    UIImageView *firstImgView = [self.imageViews objectAtIndex:0];
+    [firstImgView setImage:[self.selImages objectAtIndex:0]];
+    
+    
+}
+- (void)selectItemAtIndex:(NSInteger)index;
+{
+    if (self.currentItemIndex == index) {
+        return;
+    }
+    [[self.imageViews objectAtIndex:self.currentItemIndex] setImage:[self.unselImages objectAtIndex:self.currentItemIndex]];
+    
+    [[self.imageViews objectAtIndex:index] setImage:[self.selImages objectAtIndex:index]];
+    self.currentItemIndex=index;
+}
+/*
+#pragma mark - Navigation
+
+// In a storyboard-based application, you will often want to do a little preparation before navigation
+- (void)prepareForSegue:(UIStoryboardSegue *)segue sender:(id)sender
+{
+    // Get the new view controller using [segue destinationViewController].
+    // Pass the selected object to the new view controller.
+}
+*/
+
+@end

@@ -1,0 +1,360 @@
+//
+//  RLRoom.m
+//  manpower
+//
+//  Created by WangShunzhou on 14-9-25.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import "RLRoom.h"
+#import "RLGroupLogic.h"
+#import "XMPPManager.h"
+#import "RLMyInfo.h"
+#import "RLRoomLogic.h"
+
+@interface RLRoom()<XMPPRoomStorage>{
+    XMPPRoom *xmppRoom;
+}
+
+@end
+
+@implementation RLRoom
+
+@dynamic roomDescription;
+@dynamic roomNaturalLanguageName;
+@dynamic roomSubject;
+@dynamic roomJid;
+@dynamic nickname;
+@dynamic type;
+@dynamic photo;
+@dynamic roomID;
+@dynamic owner;
+@dynamic onlineCount;
+@dynamic ownerName;
+@dynamic sum;
+@dynamic roomName;
+
+static XMPPRoom *xmppRoom = nil;
+void (^createCompletion)(BOOL);
+void (^syncRoomCompletion)(BOOL);
+
+-(void)setValue:(id)value forUndefinedKey:(NSString *)key{}
+
++(void)syncRoomsWithArray:(NSArray *)array{
+    // 将群信息写入数据库
+    [MagicalRecord saveWithBlock:^(NSManagedObjectContext *localContext){
+        [RLRoom MR_truncateAllInContext:localContext];
+        for (NSDictionary *roomDic in array) {
+            RLRoom *room = [RLRoom MR_createInContext:localContext];
+            [room setValuesForKeysWithDictionary:roomDic];
+        }
+    }];
+}
+
++(void)syncRoomWithRoomName:(NSString*)aRoomName success:(void(^)(NSString *roomName))success failure:(void(^)(id json))failure  connectionError:(void(^)(NSError *error))connectionError{
+    
+    [RLRoomLogic getRoomInfo:aRoomName withUserJIDStr:[XMPPManager sharedInstance].xmppStream.myJID.bare success:^(id json){
+        [MagicalRecord saveWithBlock:^(NSManagedObjectContext *localContext){
+            NSDictionary *roomDic = [json objectForKey:@"mucroomVos"];
+            RLRoom *room = [RLRoom MR_findFirstByAttribute:@"roomName" withValue:[roomDic objectForKey:@"roomName"]];
+            if (room == nil) {
+                RLRoom *room = [RLRoom MR_createInContext:localContext];
+                [room setValuesForKeysWithDictionary:roomDic];
+            }
+            if (success) {
+                success([roomDic objectForKey:@"roomName"]);
+            }
+        }];
+    } failure:failure connectionError:connectionError];
+}
+
+/**
+ *  生成群ID，随机7-9位数字
+ *
+ *  @return 群ID
+ */
+-(NSString*)generateRoomName{
+    NSUInteger roomNameInt = (arc4random() % 999000000) + 1000000;
+    return [NSString stringWithFormat:@"%ld",(unsigned long)roomNameInt];
+}
+
+-(void)createRoom:(NSString*)roomNaturalName withCompletion:(void (^)(BOOL finished))completion{
+    if (self.roomName.length == 0) {
+        self.roomName = [self generateRoomName];
+    }
+    self.roomNaturalLanguageName = roomNaturalName;
+    
+    NSString * roomJidStr=[NSString stringWithFormat:@"%@@conference.%@",self.roomName,XMPP_HOST_DOMAIN];
+    XMPPJID *roomJID = [XMPPJID jidWithString:roomJidStr];
+    [[RLGroupLogic sharedRLGroupLogic] searchGroupInfoByName:self.roomName andUserJID:[[XMPPManager sharedInstance].xmppStream.myJID bare] success:^(id json) {
+        XMPPStream *xmppStream = [XMPPManager sharedInstance].xmppStream;
+        NSDictionary * dic=[(NSDictionary *)json objectForKey:@"mucroomVo"];
+        if (dic.count == 0) {
+            if (xmppRoom == nil) {
+                xmppRoom = [[XMPPRoom alloc] initWithRoomStorage:self jid:roomJID];
+                [xmppRoom activate:xmppStream];
+                [xmppRoom addDelegate:self delegateQueue:dispatch_get_main_queue()];
+            }
+            [xmppRoom joinRoomUsingNickname:[RLMyInfo sharedRLMyInfo].name history:nil];
+            createCompletion = completion;
+        }else
+        {
+            // 如果该群已存在，则重新生成群ID。
+            [self createRoom:roomNaturalName withCompletion:completion];
+            return;
+        }
+    } failure:^(NSError *err) {
+        createCompletion = nil;
+        DDLogError(@"%@",err);
+        completion(NO);
+    }];
+
+}
+
+
+
+/**
+ *  修改群主题
+ *
+ *  @param roomSubject 群主题
+ *  @param roomJIDStr  群JID
+ */
++(void)changeRoomSubject:(NSString*)roomSubject withRoomJIDStr:(NSString*)roomJIDStr{
+    /**
+     修改群subject,在我们的APP里对应的是群标签,
+     协议如下:
+     
+     <message
+     from='wiccarocks@shakespeare.lit/laptop'
+     id='lh2bs617'
+     to='coven@chat.shakespeare.lit'
+     type='groupchat'>
+     <subject>Fire Burn and Cauldron Bubble!</subject>
+     </message>
+     */
+    
+    //    RLMyInfo *myInfo = [RLMyInfo sharedRLMyInfo];
+    //    NSString *nicknameInRoom = [NSString stringWithFormat:@"%@/%@",myInfo.name,xmppStream.myJID.bare];
+    //    NSString *from = [NSString stringWithFormat:@"%@/%@",sender.roomJID.bare,nicknameInRoom];
+    
+    
+    XMPPStream *xmppStream = [XMPPManager sharedInstance].xmppStream;
+    NSString *from = xmppStream.myJID.bare;
+    NSString *to = roomJIDStr;
+    
+    XMPPMessage *message = [XMPPMessage message];
+    NSXMLElement *subject = [NSXMLElement elementWithName:@"subject" stringValue:roomSubject];
+    
+    [message addAttributeWithName:@"from" stringValue:from];
+    [message addAttributeWithName:@"to" stringValue:to];
+    [message addAttributeWithName:@"id" stringValue:[xmppStream generateUUID]];
+    [message addAttributeWithName:@"type" stringValue:@"groupchat"];
+    
+    [message addChild:subject];
+    
+    [xmppStream sendElement:message];
+}
+
+-(void)changeRoomSubject{
+    NSAssert(self.roomJid.length, @"room jid must not be empty");
+    if (self.roomSubject == nil) {
+        self.roomSubject = @"";
+    }
+    [RLRoom changeRoomSubject:self.roomSubject withRoomJIDStr:self.roomJid];
+}
+
+-(void)updateToServer{
+    NSAssert(self.roomName.length, @"Room name must not be empty!!!");
+    NSString * roomJidStr=[NSString stringWithFormat:@"%@@conference.%@",self.roomName,XMPP_HOST_DOMAIN];
+    XMPPJID *roomJID = [XMPPJID jidWithString:roomJidStr];
+    
+    if (xmppRoom == nil) {
+        xmppRoom = [[XMPPRoom alloc] initWithRoomStorage:self jid:roomJID];
+    }
+    self.roomJid = xmppRoom.roomJID.bare;
+    [xmppRoom configureRoomUsingOptions:[self configureOptions]];
+    [self changeRoomSubject];
+}
+
+-(NSXMLElement*)configureOptions{
+    //     <x xmlns='jabber:x:data' type='submit'>
+    //       <field var='FORM_TYPE'>
+    //         <value>http://jabber.org/protocol/muc#roomconfig</value>
+    //       </field>
+    //       <field var='muc#roomconfig_roomname'>
+    //         <value>A Dark Cave</value>
+    //       </field>
+    //       <field var='muc#roomconfig_enablelogging'>
+    //         <value>0</value>
+    //       </field>
+    //       ...
+    //     </x>
+    NSString *field = @"field";
+    NSString *value = @"value";
+    
+    NSArray * options = @[@{field:@"FORM_TYPE",@"value":@"http://jabber.org/protocol/muc#roomconfig"},
+                          @{field:@"muc#roomconfig_persistentroom",value:@"1"},
+                          @{field:@"muc#roomconfig_changesubject",value:@"1"},
+                          @{field:@"muc#roomconfig_roomname",value:self.roomNaturalLanguageName ? self.roomNaturalLanguageName : @""},
+                          @{field:@"muc#roomconfig_roomdesc",value:self.roomDescription ? self.roomDescription : @""},
+                          //                          @{field:@"muc#roomconfig_roomname",@"value":@"http://jabber.org/protocol/muc#roomconfig"},
+                          //                          @{field:@"muc#roomconfig_roomname",@"value":@"http://jabber.org/protocol/muc#roomconfig"},
+                          //                          @{field:@"muc#roomconfig_roomname",@"value":@"http://jabber.org/protocol/muc#roomconfig"},
+                          ];
+    
+    NSXMLElement *x = [NSXMLElement elementWithName:@"x" xmlns:@"jabber:x:data"];
+    for (NSDictionary *option in options) {
+        NSXMLElement *valueElement = [NSXMLElement elementWithName:value stringValue:option[value]];
+        NSXMLElement *fieldElement = [NSXMLElement elementWithName:field];
+        [fieldElement addAttributeWithName:@"var" stringValue:option[field]];
+        [fieldElement addChild:valueElement];
+        
+        [x addChild:fieldElement];
+    }
+    return x;
+}
+
+
+#pragma mark XMPPRoom Delegate
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+- (void)xmppRoomDidCreate:(XMPPRoom *)sender
+{
+	DDLogInfo(@"%@: %@", THIS_FILE, THIS_METHOD);
+    DDLogInfo(@"%@---------------><",[sender roomJID]);
+    DDLogInfo(@"%@---------------><",[sender myNickname]);
+//    RLGroupSetInfoVC * infoVC=[[RLGroupSetInfoVC alloc]initWithNibName:nil bundle:nil];
+//    infoVC.xmppRoom = sender;
+//    infoVC.isOwner = YES;
+//    infoVC.roomJID= sender.roomJID;
+//    infoVC.roomSubject= sender.roomSubject;
+//    infoVC.createFlag = 0;
+//    [self.navigationController pushViewController:infoVC animated:YES];
+    createCompletion(YES);
+}
+
+- (void)xmppRoomDidJoin:(XMPPRoom *)sender
+{
+	DDLogInfo(@"%@: %@", THIS_FILE, THIS_METHOD);
+	[xmppRoom fetchConfigurationForm];
+	[xmppRoom fetchBanList];
+	[xmppRoom fetchMembersList];
+	[xmppRoom fetchModeratorsList];
+    
+    
+    // 通过API修在群昵称，此群昵称与XMPP协议中的不一样，只是写入服务数据库中，方便API读取。
+    NSString *nickname = [RLMyInfo sharedRLMyInfo].name;
+    NSString *userJID = [XMPPManager sharedInstance].xmppStream.myJID.bare;
+    [RLRoomLogic changeNickname:nickname withUserJIDStr:userJID withRoomName:sender.roomJID.user];
+}
+
+- (void)xmppRoom:(XMPPRoom *)sender didFetchConfigurationForm:(NSXMLElement *)configForm
+{
+	DDLogInfo(@"%@: %@", THIS_FILE, THIS_METHOD);
+    
+    
+    //房间配置
+//    DDLogInfo(@"config : %@", configForm);
+    /*
+     NSXMLElement *newConfig = [configForm copy];
+     NSArray* fields = [newConfig elementsForName:@"field"];
+     for (NSXMLElement *field in fields) {
+     NSString *var = [field attributeStringValueForName:@"var"];
+     if ([var isEqualToString:@"muc#roomconfig_persistentroom"]) {//修改使持久
+     [field removeChildAtIndex:0];
+     [field addChild:[NSXMLElement elementWithName:@"value" stringValue:@"1"]];
+     }
+     else if ([var isEqualToString:@"muc#roomconfig_roomname"]){//修改群名称
+     [field removeChildAtIndex:0];
+     [field addChild:[NSXMLElement elementWithName:@"value" stringValue:@"ios测试创建"]];
+     }
+     else if ([var isEqualToString:@"muc#roomconfig_roomdesc"]){//修改群公告
+     [field removeChildAtIndex:0];
+     [field addChild:[NSXMLElement elementWithName:@"value" stringValue:@"这是描述"]];
+     }
+     else if ([var isEqualToString:@"muc#roomconfig_changesubject"]){//修改使允许占有者更改主题（缺省既所有人都可更改）
+     [field removeChildAtIndex:0];
+     [field addChild:[NSXMLElement elementWithName:@"value" stringValue:@"1"]];
+     }
+     
+     }
+     [sender configureRoomUsingOptions:newConfig];
+     */
+    
+    
+    [sender configureRoomUsingOptions:[self configureOptions]];
+    
+
+}
+- (void)xmppRoom:(XMPPRoom *)sender didConfigure:(XMPPIQ *)iqResult{
+    DDLogInfo(@"%@: %@", THIS_FILE, THIS_METHOD);
+}
+- (void)xmppRoom:(XMPPRoom *)sender didNotConfigure:(XMPPIQ *)iqResult{
+    DDLogInfo(@"%@: %@", THIS_FILE, THIS_METHOD);
+}
+- (void)xmppRoom:(XMPPRoom *)sender didFetchBanList:(NSArray *)items
+{
+	DDLogInfo(@"%@: %@", THIS_FILE, THIS_METHOD);
+}
+
+- (void)xmppRoom:(XMPPRoom *)sender didNotFetchBanList:(XMPPIQ *)iqError
+{
+	DDLogInfo(@"%@: %@", THIS_FILE, THIS_METHOD);
+}
+
+- (void)xmppRoom:(XMPPRoom *)sender didFetchMembersList:(NSArray *)items
+{
+	DDLogInfo(@"%@: %@", THIS_FILE, THIS_METHOD);
+    DDLogVerbose(@"%@",items);
+}
+
+- (void)xmppRoom:(XMPPRoom *)sender didNotFetchMembersList:(XMPPIQ *)iqError
+{
+	DDLogInfo(@"%@: %@", THIS_FILE, THIS_METHOD);
+}
+
+- (void)xmppRoom:(XMPPRoom *)sender didFetchModeratorsList:(NSArray *)items
+{
+	DDLogInfo(@"%@: %@", THIS_FILE, THIS_METHOD);
+}
+
+- (void)xmppRoom:(XMPPRoom *)sender didNotFetchModeratorsList:(XMPPIQ *)iqError
+{
+	DDLogInfo(@"%@: %@", THIS_FILE, THIS_METHOD);
+}
+
+- (void)handleDidLeaveRoom:(XMPPRoom *)room
+{
+	DDLogInfo(@"%@: %@", THIS_FILE, THIS_METHOD);
+}
+- (void)xmppRoom:(XMPPRoom *)sender didReceiveMessage:(XMPPMessage *)message fromOccupant:(XMPPJID *)occupantJID{
+    
+    
+    
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#pragma mark XMPPRoomStorage Protocol
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+- (void)handlePresence:(XMPPPresence *)presence room:(XMPPRoom *)room
+{
+    
+}
+
+- (void)handleIncomingMessage:(XMPPMessage *)message room:(XMPPRoom *)room
+{
+    
+}
+
+- (void)handleOutgoingMessage:(XMPPMessage *)message room:(XMPPRoom *)room
+{
+    
+}
+
+- (BOOL)configureWithParent:(XMPPRoom *)aParent queue:(dispatch_queue_t)queue
+{
+	return YES;
+}
+
+@end

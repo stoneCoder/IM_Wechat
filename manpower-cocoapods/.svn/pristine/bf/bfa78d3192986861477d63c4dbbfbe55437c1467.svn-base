@@ -1,0 +1,235 @@
+//
+//  RLCreateRoomVC.m
+//  manpower
+//
+//  Created by hanjin on 14-6-6.
+//  Copyright (c) 2014年 WHZM. All rights reserved.
+//
+
+#import "RLCreateRoomVC.h"
+#import "XMPPRoom.h"
+#import "XMPPManager.h"
+#import "IMAlert.h"
+#import "RLMyInfo.h"
+#import "RLRoomLogic.h"
+#import "RLGroupVO.h"
+@interface RLCreateRoomVC ()<XMPPRoomStorage>
+{
+    XMPPStream *xmppStream;
+    XMPPRoom *xmppRoom;
+}
+@property (weak, nonatomic) IBOutlet UITextField *roomName;
+@end
+
+@implementation RLCreateRoomVC
+
+- (id)initWithNibName:(NSString *)nibNameOrNil bundle:(NSBundle *)nibBundleOrNil
+{
+    self = [super initWithNibName:nibNameOrNil bundle:nibBundleOrNil];
+    if (self) {
+        // Custom initialization
+        self.roomName.autocorrectionType = UITextAutocorrectionTypeNo;
+    }
+    return self;
+}
+
+- (void)viewDidLoad
+{
+    [super viewDidLoad];
+    // Do any additional setup after loading the view from its nib.
+    [self makeNaviLeftButtonVisible:YES];
+    self.roomName.clearButtonMode = UITextFieldViewModeWhileEditing;
+    self.logic = [[RLGroupLogic alloc] init];
+    [self setTitleText:@"创建群"];
+
+}
+
+- (void)didReceiveMemoryWarning
+{
+    [super didReceiveMemoryWarning];
+    // Dispose of any resources that can be recreated.
+}
+
+- (IBAction)doneClick:(id)sender {
+    if (self.roomName.text.length == 0) {
+        [self showStringHUD:@"请输入群名称" second:1.5];
+        return;
+    }
+    
+    [RLRoomLogic createRoom:self.roomName.text withUserJID:[XMPPManager sharedInstance].xmppStream.myJID.bare withDescription:@"description" withSubject:@"subject" withNaturalName:@"" withView:self.view success:^(id json){
+        RLGroupVO * group = [[RLGroupVO alloc] init];
+        NSDictionary *dic = [json objectForKey:@"mucroomVo"];
+        [group setValuesForKeysWithDictionary:dic];
+        
+        NSString * roomJidStr=[NSString stringWithFormat:@"%@@conference.%@",group.roomName,XMPP_HOST_DOMAIN];
+        XMPPJID * roomJID = [XMPPJID jidWithString:roomJidStr];
+
+        xmppRoom = [[XMPPRoom alloc] initWithRoomStorage:self jid:roomJID];
+        [xmppRoom joinRoomUsingNickname:[RLMyInfo sharedRLMyInfo].name history:nil];
+
+        RLGroupSetInfoVC * infoVC=[[RLGroupSetInfoVC alloc]initWithNibName:nil bundle:nil];
+        infoVC.xmppRoom = xmppRoom;
+        infoVC.isOwner = YES;
+        infoVC.roomJID= xmppRoom.roomJID;
+        infoVC.roomSubject= xmppRoom.roomSubject;
+        infoVC.createFlag = 0;
+        infoVC.group = group;
+        [self.navigationController pushViewController:infoVC animated:YES];
+    } failure:^(id json){
+        
+    }];
+    /*
+    NSString * roomJidStr=[NSString stringWithFormat:@"%@@conference.%@",self.roomName.text,XMPP_HOST_DOMAIN];
+    XMPPJID *roomJID = [XMPPJID jidWithString:roomJidStr];
+    [self.logic searchGroupInfoByName:self.roomName.text andUserJID:[[XMPPManager sharedInstance].xmppStream.myJID bare] success:^(id json) {
+        [self hideHUD];
+        NSDictionary * dic=(NSDictionary *)json;
+        if (dic.count == 0) {
+            xmppStream = [XMPPManager sharedInstance].xmppStream;
+            xmppRoom = [[XMPPRoom alloc] initWithRoomStorage:self jid:roomJID];
+            [xmppRoom activate:xmppStream];
+            [xmppRoom addDelegate:self delegateQueue:dispatch_get_main_queue()];
+            [xmppRoom joinRoomUsingNickname:[RLMyInfo sharedRLMyInfo].name history:nil];
+            [xmppRoom configureRoomUsingOptions:nil];
+        }else
+        {
+            [[IMAlert alloc] alert:@"该群已存在" delegate:self];
+            return;
+        }
+    } failure:^(NSError *err) {
+        [self failureHideHUD];
+    }];
+    */
+}
+#pragma mark XMPPRoom Delegate
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+- (void)xmppRoomDidCreate:(XMPPRoom *)sender
+{
+	DDLogInfo(@"%@: %@", THIS_FILE, THIS_METHOD);
+    DDLogInfo(@"%@---------------><",[sender roomJID]);
+    DDLogInfo(@"%@---------------><",[sender myNickname]);
+    RLGroupSetInfoVC * infoVC=[[RLGroupSetInfoVC alloc]initWithNibName:nil bundle:nil];
+    infoVC.xmppRoom = sender;
+    infoVC.isOwner = YES;
+    infoVC.roomJID= sender.roomJID;
+    infoVC.roomSubject= sender.roomSubject;
+    infoVC.createFlag = 0;
+    [self.navigationController pushViewController:infoVC animated:YES];
+}
+
+- (void)xmppRoomDidJoin:(XMPPRoom *)sender
+{
+	DDLogInfo(@"%@: %@", THIS_FILE, THIS_METHOD);
+	[xmppRoom fetchConfigurationForm];
+	[xmppRoom fetchBanList];
+	[xmppRoom fetchMembersList];
+	[xmppRoom fetchModeratorsList];
+    
+    [sender changeRoomSubject:@"这是主题"];
+}
+
+- (void)xmppRoom:(XMPPRoom *)sender didFetchConfigurationForm:(NSXMLElement *)configForm
+{
+	DDLogInfo(@"%@: %@", THIS_FILE, THIS_METHOD);
+    
+    
+    //房间配置
+    DDLogInfo(@"config : %@", configForm);
+    NSXMLElement *newConfig = [configForm copy];
+    NSArray* fields = [newConfig elementsForName:@"field"];
+    for (NSXMLElement *field in fields) {
+        NSString *var = [field attributeStringValueForName:@"var"];
+        if ([var isEqualToString:@"muc#roomconfig_persistentroom"]) {//修改使持久
+            [field removeChildAtIndex:0];
+            [field addChild:[NSXMLElement elementWithName:@"value" stringValue:@"1"]];
+        }
+//        else if ([var isEqualToString:@"muc#roomconfig_roomname"]){//修改群名称
+//            [field removeChildAtIndex:0];
+//            [field addChild:[NSXMLElement elementWithName:@"value" stringValue:@"ios测试创建"]];
+//        }
+//        else if ([var isEqualToString:@"muc#roomconfig_roomdesc"]){//修改群公告
+//            [field removeChildAtIndex:0];
+//            [field addChild:[NSXMLElement elementWithName:@"value" stringValue:@"这是描述"]];
+//        }
+//        else if ([var isEqualToString:@"muc#roomconfig_changesubject"]){//修改使允许占有者更改主题（缺省既所有人都可更改）
+//            [field removeChildAtIndex:0];
+//            [field addChild:[NSXMLElement elementWithName:@"value" stringValue:@"1"]];
+//        }
+        
+    }
+    [sender configureRoomUsingOptions:newConfig];
+    
+}
+- (void)xmppRoom:(XMPPRoom *)sender didConfigure:(XMPPIQ *)iqResult{
+    DDLogInfo(@"%@: %@", THIS_FILE, THIS_METHOD);
+}
+- (void)xmppRoom:(XMPPRoom *)sender didNotConfigure:(XMPPIQ *)iqResult{
+    DDLogInfo(@"%@: %@", THIS_FILE, THIS_METHOD);
+}
+- (void)xmppRoom:(XMPPRoom *)sender didFetchBanList:(NSArray *)items
+{
+	DDLogInfo(@"%@: %@", THIS_FILE, THIS_METHOD);
+}
+
+- (void)xmppRoom:(XMPPRoom *)sender didNotFetchBanList:(XMPPIQ *)iqError
+{
+	DDLogInfo(@"%@: %@", THIS_FILE, THIS_METHOD);
+}
+
+- (void)xmppRoom:(XMPPRoom *)sender didFetchMembersList:(NSArray *)items
+{
+	DDLogInfo(@"%@: %@", THIS_FILE, THIS_METHOD);
+    
+}
+
+- (void)xmppRoom:(XMPPRoom *)sender didNotFetchMembersList:(XMPPIQ *)iqError
+{
+	DDLogInfo(@"%@: %@", THIS_FILE, THIS_METHOD);
+}
+
+- (void)xmppRoom:(XMPPRoom *)sender didFetchModeratorsList:(NSArray *)items
+{
+	DDLogInfo(@"%@: %@", THIS_FILE, THIS_METHOD);
+}
+
+- (void)xmppRoom:(XMPPRoom *)sender didNotFetchModeratorsList:(XMPPIQ *)iqError
+{
+	DDLogInfo(@"%@: %@", THIS_FILE, THIS_METHOD);
+}
+
+- (void)handleDidLeaveRoom:(XMPPRoom *)room
+{
+	DDLogInfo(@"%@: %@", THIS_FILE, THIS_METHOD);
+}
+- (void)xmppRoom:(XMPPRoom *)sender didReceiveMessage:(XMPPMessage *)message fromOccupant:(XMPPJID *)occupantJID{
+    
+    
+    
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#pragma mark XMPPRoomStorage Protocol
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+- (void)handlePresence:(XMPPPresence *)presence room:(XMPPRoom *)room
+{
+    
+}
+
+- (void)handleIncomingMessage:(XMPPMessage *)message room:(XMPPRoom *)room
+{
+    
+}
+
+- (void)handleOutgoingMessage:(XMPPMessage *)message room:(XMPPRoom *)room
+{
+    
+}
+
+- (BOOL)configureWithParent:(XMPPRoom *)aParent queue:(dispatch_queue_t)queue
+{
+	return YES;
+}
+
+@end
